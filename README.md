@@ -125,7 +125,7 @@ docs/                        # design documents
 ## Engineering practices
 
 - **A regression test per production incident.** Most files in `tests/` exist because something once went wrong with real money on the line; the test pins the fix.
-- **Agentic development.** The system is built and maintained with Claude Code under a documented workflow — see [docs/agentic-workflow.md](docs/agentic-workflow.md) _(forthcoming)_. The signer's policy engine doubles as the guardrail layer that makes autonomous operation acceptable.
+- **Agentic development.** The system is built and maintained with Claude Code under a documented workflow — see [docs/agentic-workflow.md](docs/agentic-workflow.md). The signer's policy engine doubles as the guardrail layer that makes autonomous operation acceptable.
 - **Changelog discipline.** Every deploy is versioned and recorded in [CHANGELOG.md](CHANGELOG.md) (65KB and counting).
 
 ## Roadmap
