@@ -1,0 +1,271 @@
+{
+  "_generator": "signer-rs/fixtures-gen/gen-tx-vectors.ts",
+  "_source_of_truth": "signer/alt-resolver.ts (extractProgramIds, resolveALTs ordering) and signer/policy.ts (legacy account-key dedup, SPL transfer field offsets)",
+  "_deterministic": true,
+  "_fixed_material": {
+    "signer_pubkey": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+    "signer_seed": "[0x42; 32]",
+    "extra_signer_pubkey": "3MZskhKUdNRkeMQ6zyNVSJcCx38o79ohwmSgZ2d5a4cu",
+    "extra_signer_seed": "[0x43; 32]",
+    "recipient_pubkey": "FVdnakemjhcemfWUgNR2AERbk5Pog7zJ1UF2LjbocBUj",
+    "recipient_seed": "[0x44; 32]",
+    "mint": "7gkuBN82Zmwey6MZFBM4bHsNdc6sjuPbujsXa9XJqtZT",
+    "mint_seed": "[0x45; 32]",
+    "signer_ata": "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+    "dest_ata": "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4",
+    "blockhash": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "blockhash_bytes": "[0x01; 32]",
+    "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "system_program": "11111111111111111111111111111111"
+  },
+  "_field_notes": {
+    "unsigned_b64": "What the bot sends to the signer: legacy uses serialize({requireAllSignatures:false}), versioned uses serialize() on an unsigned VersionedTransaction (zero-filled signatures).",
+    "ts_signed_b64": "The same transaction after the TypeScript signer adds the signer key.",
+    "program_ids": "Legacy: one entry per instruction, duplicates kept (policy.ts maps instructions). Versioned: deduplicated first-seen order (extractProgramIds uses a Set).",
+    "account_keys": "See account_keys_source on each vector — the two paths order keys differently.",
+    "transfers": "Every SPL Transfer / TransferChecked the policy engine would inspect, with the destination it resolves. amount is a decimal u64 string.",
+    "signature_slots": "Signature block of the UNSIGNED bytes: which slots the port must fill and which are already occupied by a pre-signed extra signer."
+  },
+  "vectors": [
+    {
+      "name": "legacy_spl_transfer",
+      "description": "Legacy transaction with a single SPL Token Transfer (discriminator 3) from the signer ATA to a fixed destination ATA. Only the signer signs.",
+      "kind": "legacy",
+      "unsigned_b64": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEEIVL40Zt5HSRFMkLhXy6rbLfP+ntqXtMAl5YOBpiB2xKib7XSItnDLMLui1BOnBLPBE0APzXj8RmXlD4B1rOf7dX8xLRzoOTkYRomes6bcASEkm5bvpjLMncD9sDEbVOzBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEDAwIBAAkDh9YSAAAAAAA=",
+      "unsigned_len": 245,
+      "ts_signed_b64": "AVxBdmhyil0cW+htgAphlIdw0Sfn9Egv+T3nF5DLT/tjuoL774yA0VwVjFaXC7Vg87ZcIh7AFcBUWcGzC9Rr+gABAAEEIVL40Zt5HSRFMkLhXy6rbLfP+ntqXtMAl5YOBpiB2xKib7XSItnDLMLui1BOnBLPBE0APzXj8RmXlD4B1rOf7dX8xLRzoOTkYRomes6bcASEkm5bvpjLMncD9sDEbVOzBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEDAwIBAAkDh9YSAAAAAAA=",
+      "ts_signed_len": 245,
+      "signed_by": [
+        "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf"
+      ],
+      "expected": {
+        "fee_payer": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+        "recent_blockhash": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "num_instructions": 1,
+        "program_ids": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_keys": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+          "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4",
+          "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf"
+        ],
+        "account_keys_source": "signer/policy.ts legacy branch: flatMap([programId, ...keys]) over instructions, deduped, instruction order",
+        "address_table_lookups": [],
+        "signature_slots": [
+          {
+            "index": 0,
+            "pubkey": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "present": false
+          }
+        ],
+        "transfers": [
+          {
+            "ix_index": 0,
+            "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "discriminator": 3,
+            "kind": "transfer",
+            "source": "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+            "dest": "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4",
+            "authority": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "amount": "1234567"
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy_two_signer_presigned",
+      "description": "Legacy transaction requiring two signatures. The extra keypair has already signed, so the unsigned bytes carry one real signature and one zero-filled slot at the fee-payer index. The port must fill slot 0 without disturbing slot 1.",
+      "kind": "legacy",
+      "unsigned_b64": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARzvpxgybDxGeTgtnZM7Mg8PNDF+FQW/sRgiy9E1NjRrVKS1aTolhbUhSldT3Y0RBnMChFIj1bFRvZTP3ON1kPAgACBiFS+NGbeR0kRTJC4V8uq2y3z/p7al7TAJeWDgaYgdsSIvwpd5Lwtv/Av8/bftsMCqFOAlo2XsDjQuhuOCnLdLaib7XSItnDLMLui1BOnBLPBE0APzXj8RmXlD4B1rOf7dX8xLRzoOTkYRomes6bcASEkm5bvpjLMncD9sDEbVOzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAgQCAAE0AAAAAPAdHwAAAAAApQAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqQUDAwIACQP0AQAAAAAAAA==",
+      "unsigned_len": 430,
+      "ts_signed_b64": "AiX2F528j9UhMPfPWfOYqBk4hKcfuvhzjeZcjDISIYYY4rx4sRw5+5I2y9u19WyoexcmGs4AExdrVL1yFRZvhwMRzvpxgybDxGeTgtnZM7Mg8PNDF+FQW/sRgiy9E1NjRrVKS1aTolhbUhSldT3Y0RBnMChFIj1bFRvZTP3ON1kPAgACBiFS+NGbeR0kRTJC4V8uq2y3z/p7al7TAJeWDgaYgdsSIvwpd5Lwtv/Av8/bftsMCqFOAlo2XsDjQuhuOCnLdLaib7XSItnDLMLui1BOnBLPBE0APzXj8RmXlD4B1rOf7dX8xLRzoOTkYRomes6bcASEkm5bvpjLMncD9sDEbVOzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAgQCAAE0AAAAAPAdHwAAAAAApQAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqQUDAwIACQP0AQAAAAAAAA==",
+      "ts_signed_len": 430,
+      "signed_by": [
+        "3MZskhKUdNRkeMQ6zyNVSJcCx38o79ohwmSgZ2d5a4cu",
+        "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf"
+      ],
+      "expected": {
+        "fee_payer": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+        "recent_blockhash": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "num_instructions": 2,
+        "program_ids": [
+          "11111111111111111111111111111111",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_keys": [
+          "11111111111111111111111111111111",
+          "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+          "3MZskhKUdNRkeMQ6zyNVSJcCx38o79ohwmSgZ2d5a4cu",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+          "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4"
+        ],
+        "account_keys_source": "signer/policy.ts legacy branch: flatMap([programId, ...keys]) over instructions, deduped, instruction order",
+        "address_table_lookups": [],
+        "signature_slots": [
+          {
+            "index": 0,
+            "pubkey": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "present": false
+          },
+          {
+            "index": 1,
+            "pubkey": "3MZskhKUdNRkeMQ6zyNVSJcCx38o79ohwmSgZ2d5a4cu",
+            "present": true
+          }
+        ],
+        "transfers": [
+          {
+            "ix_index": 1,
+            "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "discriminator": 3,
+            "kind": "transfer",
+            "source": "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+            "dest": "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4",
+            "authority": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "amount": "500"
+          }
+        ]
+      }
+    },
+    {
+      "name": "v0_no_alt",
+      "description": "VersionedTransaction (MessageV0) with a System transfer and an SPL transfer, compiled without lookup tables. Unsigned bytes carry a zero-filled signature slot.",
+      "kind": "versioned",
+      "unsigned_b64": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQACBiFS+NGbeR0kRTJC4V8uq2y3z/p7al7TAJeWDgaYgdsS11l5O7wTooGagnx2rbb7qKSa7gB/SfLQmS2ZuCWtLEjV/MS0c6Dk5GEaJnrOm3AEhJJuW76YyzJ3A/bAxG1Ts6JvtdIi2cMswu6LUE6cEs8ETQA/NePxGZeUPgHWs5/tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAgQCAAEMAgAAAEBCDwAAAAAABQMCAwAJAyoAAAAAAAAAAA==",
+      "unsigned_len": 328,
+      "ts_signed_b64": "ASIWsteiFHDFExTlSGXg1uiPNv0dvtLYZCT4ONnNzmpSFfhT50ZW/o99sXeusyO3XmfM8+SBMrOIoAuHIDbp8w2AAQACBiFS+NGbeR0kRTJC4V8uq2y3z/p7al7TAJeWDgaYgdsS11l5O7wTooGagnx2rbb7qKSa7gB/SfLQmS2ZuCWtLEjV/MS0c6Dk5GEaJnrOm3AEhJJuW76YyzJ3A/bAxG1Ts6JvtdIi2cMswu6LUE6cEs8ETQA/NePxGZeUPgHWs5/tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAgQCAAEMAgAAAEBCDwAAAAAABQMCAwAJAyoAAAAAAAAAAA==",
+      "ts_signed_len": 328,
+      "signed_by": [
+        "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf"
+      ],
+      "expected": {
+        "fee_payer": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+        "recent_blockhash": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "num_instructions": 2,
+        "program_ids": [
+          "11111111111111111111111111111111",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "static_account_keys": [
+          "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+          "FVdnakemjhcemfWUgNR2AERbk5Pog7zJ1UF2LjbocBUj",
+          "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+          "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4",
+          "11111111111111111111111111111111",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_keys": [
+          "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+          "FVdnakemjhcemfWUgNR2AERbk5Pog7zJ1UF2LjbocBUj",
+          "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+          "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4",
+          "11111111111111111111111111111111",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_keys_source": "signer/alt-resolver.ts resolveALTs: static keys ++ writable lookups ++ readonly lookups",
+        "address_table_lookups": [],
+        "signature_slots": [
+          {
+            "index": 0,
+            "pubkey": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "present": false
+          }
+        ],
+        "transfers": [
+          {
+            "ix_index": 1,
+            "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "discriminator": 3,
+            "kind": "transfer",
+            "source": "FQKPaTzfLuGZ3m2Z5GbgYHZh81XSrDghb1C2uq3SY7rS",
+            "dest": "Bw5qxgRHUMoYQfK3x8E9fCosKNK6BALMJHDCWw7gsHS4",
+            "authority": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "amount": "42"
+          }
+        ]
+      }
+    },
+    {
+      "name": "v0_with_alt",
+      "description": "VersionedTransaction whose token accounts resolve through one address lookup table, with both writable (transfer source/destination) and readonly (TransferChecked mint) lookups. Program ids and account keys in `expected` are post-expansion. The table itself is in alt_vectors.json.",
+      "kind": "versioned",
+      "unsigned_b64": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQABAiFS+NGbeR0kRTJC4V8uq2y3z/p7al7TAJeWDgaYgdsSBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQIBAwIDAAkDOTAAAAAAAAABBAQGBQAKDIUaAAAAAAAABgE+8IlZAzAoyPxvxtSRoSVI5432rvstfCwZDD94zvP1CwQAAQQFAQM=",
+      "unsigned_len": 239,
+      "ts_signed_b64": "AWCDxuwKTwZCSRlDtmO7tj10PbAvh0swvQCRaAZ0V1Hy+vK2hQfrHHyIH3S8v8I8mn0dXzv+lLarpwfExKOiYgOAAQABAiFS+NGbeR0kRTJC4V8uq2y3z/p7al7TAJeWDgaYgdsSBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQIBAwIDAAkDOTAAAAAAAAABBAQGBQAKDIUaAAAAAAAABgE+8IlZAzAoyPxvxtSRoSVI5432rvstfCwZDD94zvP1CwQAAQQFAQM=",
+      "ts_signed_len": 239,
+      "signed_by": [
+        "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf"
+      ],
+      "expected": {
+        "fee_payer": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+        "recent_blockhash": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "num_instructions": 2,
+        "program_ids": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "static_account_keys": [
+          "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_keys": [
+          "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "61cnDLpUEjgiWXFHvBoSuLDuXp7DJ4gkwdJgnEsKfP1w",
+          "CnEDk9HrMnmiHXEV1WFgbVCRteYnPqsJwrTdcZaNhFVW",
+          "3wpYnGqceZ8DzN3guiTd9rrYkWTwTHCChBSuo6cvkXTG",
+          "FR5pWwinRBn35GNhg7bsvw8Q13kRept2pm561DwZCQzT",
+          "CJfRUQxyonG6B5mnztsNUqxknbFT89DJdrdrzV9F96mU"
+        ],
+        "account_keys_source": "signer/alt-resolver.ts resolveALTs: static keys ++ writable lookups ++ readonly lookups",
+        "address_table_lookups": [
+          {
+            "account_key": "5Eh1XBvsP8C7YyPumA9mDyGraYxyVchZwq2eTUXFUbtW",
+            "writable_indexes": [
+              0,
+              1,
+              4,
+              5
+            ],
+            "readonly_indexes": [
+              3
+            ]
+          }
+        ],
+        "signature_slots": [
+          {
+            "index": 0,
+            "pubkey": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "present": false
+          }
+        ],
+        "transfers": [
+          {
+            "ix_index": 0,
+            "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "discriminator": 3,
+            "kind": "transfer",
+            "source": "61cnDLpUEjgiWXFHvBoSuLDuXp7DJ4gkwdJgnEsKfP1w",
+            "dest": "CnEDk9HrMnmiHXEV1WFgbVCRteYnPqsJwrTdcZaNhFVW",
+            "authority": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "amount": "12345"
+          },
+          {
+            "ix_index": 1,
+            "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "discriminator": 12,
+            "kind": "transfer_checked",
+            "source": "3wpYnGqceZ8DzN3guiTd9rrYkWTwTHCChBSuo6cvkXTG",
+            "dest": "FR5pWwinRBn35GNhg7bsvw8Q13kRept2pm561DwZCQzT",
+            "mint": "CJfRUQxyonG6B5mnztsNUqxknbFT89DJdrdrzV9F96mU",
+            "authority": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+            "amount": "6789",
+            "decimals": 6
+          }
+        ]
+      }
+    }
+  ]
+}

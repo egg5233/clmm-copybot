@@ -1,0 +1,62 @@
+{
+  "_generator": "signer-rs/fixtures-gen/gen-crypto-vectors.ts",
+  "_source_of_truth": "signer/crypto.ts (encryptKey / decryptKey)",
+  "_deterministic": false,
+  "_determinism_note": "encryptKey draws a random 32-byte salt and 16-byte IV per call, so salt/iv/tag/data differ on every regeneration. The vectors stay valid because the Rust port is asserted against the values recorded here, not against a fixed ciphertext.",
+  "_key_material_note": "Throwaway ed25519 keypair from the fixed 32-byte seed [0x42; 32]. Never used on-chain, holds no funds. The same seed backs the signer keypair in tx_vectors.json.",
+  "params": {
+    "algorithm": "aes-256-gcm",
+    "kdf": "scrypt",
+    "scrypt_n": 16384,
+    "scrypt_r": 8,
+    "scrypt_p": 1,
+    "key_len": 32,
+    "salt_len": 32,
+    "iv_len": 16,
+    "tag_len": 16,
+    "encoding": "hex",
+    "plaintext_encoding": "utf-8"
+  },
+  "vectors": [
+    {
+      "name": "valid",
+      "description": "Correct password decrypts the keyfile to the original base58 secret key.",
+      "keyfile": {
+        "salt": "9535bb8fa6eee541cbebf64156d90485cfef03e2d7d37ef278712bd0fb809720",
+        "iv": "a1808651a72dcf6722a3d6bd00525809",
+        "tag": "d67750110e07ebdf184e21bc37506e94",
+        "data": "50d1894e297e1e33a6a444e898973d4a7e10deb2a465bf483e6974c481605df14134705619327cc4ec37382dfbd1e864c77f7d68e960c0e692aaa5e42918150f79a91394f04727142872fc772e39d2e70f320f4c278b8916"
+      },
+      "password": "test-password-123",
+      "expect": "ok",
+      "expected_plaintext_base58": "2KqNxgmhsAH91zr5iAty4FrUwjhEAcu22kj5htCEMTWVpzJUoQBuuR51fCrJeu3wnoNFpMDZMowXVYYmoLgzv2c9",
+      "expected_pubkey": "3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf"
+    },
+    {
+      "name": "wrong_password",
+      "description": "Wrong password derives a different AES key, so GCM tag verification fails in final().",
+      "keyfile": {
+        "salt": "9535bb8fa6eee541cbebf64156d90485cfef03e2d7d37ef278712bd0fb809720",
+        "iv": "a1808651a72dcf6722a3d6bd00525809",
+        "tag": "d67750110e07ebdf184e21bc37506e94",
+        "data": "50d1894e297e1e33a6a444e898973d4a7e10deb2a465bf483e6974c481605df14134705619327cc4ec37382dfbd1e864c77f7d68e960c0e692aaa5e42918150f79a91394f04727142872fc772e39d2e70f320f4c278b8916"
+      },
+      "password": "wrong",
+      "expect": "error",
+      "expected_error_message": "Wrong password"
+    },
+    {
+      "name": "tampered_tag",
+      "description": "Valid keyfile with the first auth-tag byte XORed by 0xFF; correct password, but GCM authentication must reject it. Guards against a port that ignores the tag.",
+      "keyfile": {
+        "salt": "9535bb8fa6eee541cbebf64156d90485cfef03e2d7d37ef278712bd0fb809720",
+        "iv": "a1808651a72dcf6722a3d6bd00525809",
+        "tag": "297750110e07ebdf184e21bc37506e94",
+        "data": "50d1894e297e1e33a6a444e898973d4a7e10deb2a465bf483e6974c481605df14134705619327cc4ec37382dfbd1e864c77f7d68e960c0e692aaa5e42918150f79a91394f04727142872fc772e39d2e70f320f4c278b8916"
+      },
+      "password": "test-password-123",
+      "expect": "error",
+      "expected_error_message": "Wrong password"
+    }
+  ]
+}

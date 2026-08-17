@@ -1,0 +1,3 @@
+# Product names that legitimately contain internal capitals, so clippy::doc_markdown
+# does not demand backticks around them in prose. ".." keeps clippy's defaults.
+doc-valid-idents = ["PancakeSwap", "PostgreSQL", ".."]

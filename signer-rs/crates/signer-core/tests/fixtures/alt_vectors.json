@@ -1,0 +1,49 @@
+{
+  "_generator": "signer-rs/fixtures-gen/gen-tx-vectors.ts",
+  "_deterministic": true,
+  "_note": "The lookup table referenced by the v0_with_alt vector. raw_account_data_b64 is the on-chain account data the signer would fetch via getMultipleAccountsInfo, so the Rust ALT parser can be tested without RPC. Verified by round-tripping through AddressLookupTableAccount.deserialize().",
+  "alt_account_key": "5Eh1XBvsP8C7YyPumA9mDyGraYxyVchZwq2eTUXFUbtW",
+  "alt_account_key_seed": "[0x50; 32]",
+  "authority": "DwiiKAQ7MXWDnCQiZcH81bF1pMyf6mYBLSKNKAxSEWzd",
+  "authority_seed": "[0x51; 32]",
+  "deactivation_slot": "18446744073709551615",
+  "deactivation_slot_note": "u64::MAX — the table is active (never deactivated).",
+  "last_extended_slot": 0,
+  "last_extended_slot_start_index": 0,
+  "address_seeds": [
+    "[0x60; 32]",
+    "[0x61; 32]",
+    "[0x62; 32]",
+    "[0x63; 32]",
+    "[0x64; 32]",
+    "[0x65; 32]",
+    "[0x66; 32]",
+    "[0x67; 32]"
+  ],
+  "addresses": [
+    "61cnDLpUEjgiWXFHvBoSuLDuXp7DJ4gkwdJgnEsKfP1w",
+    "CnEDk9HrMnmiHXEV1WFgbVCRteYnPqsJwrTdcZaNhFVW",
+    "46Kq4hASUdvUbwR7s7Pie3x8f4HRB3NLay7Z9jh9eZsB",
+    "CJfRUQxyonG6B5mnztsNUqxknbFT89DJdrdrzV9F96mU",
+    "3wpYnGqceZ8DzN3guiTd9rrYkWTwTHCChBSuo6cvkXTG",
+    "FR5pWwinRBn35GNhg7bsvw8Q13kRept2pm561DwZCQzT",
+    "4Yk9HoDSfJv9QcmJbLcXdWVgS7nfvdUqiVcvbSu8VBru",
+    "2FmTRNa4NTmmswmafCReLTHRTEMVEMUmzgRdBLrDRk57"
+  ],
+  "raw_account_data_b64": "AQAAAP//////////AAAAAAAAAAAAAcBQxWN6RPqGKf/zzMziMAyzYqY9mdlfxUFFJm9DMkRaAABKcuQDW7Q10KpC1DuIc9nwfLm/R2/ireCrpJmD7r1CXq8Go+MpFxTk81bBnJsVzRlR7G5mYqp3vgdUfyiTgzQdLfBBJfABWvtHzoU674dyCU/5SYwUyxueEpc8KSfaD6an9t+vjzi4m6jOZJtZT5Hk0B/cV/nJST30O15QqZhzZyvCgAszFuAJIJ/9dX2rGczwroS8eukGVOHoFxLScPZT1i8Bah79Hk/feT60LNhEceG6nwzwTRKHtcxx9hYofLg0tNkEMVbLbc8L6wopSbdVnJQNK8ttvoxTqbMCeOOnRhKkFZLIt8F9QFnnspth6P+Wx0FfL4AzSPLwF+BbnqHa",
+  "raw_account_data_len": 312,
+  "round_trip_verified": true,
+  "layout": {
+    "meta_size": 56,
+    "fields": [
+      "0..4    type_index                   u32 LE (1 = LookupTable)",
+      "4..12   deactivation_slot            u64 LE",
+      "12..20  last_extended_slot           u64 LE",
+      "20..21  last_extended_slot_start_idx u8",
+      "21..22  authority Option tag         u8 (1 = Some)",
+      "22..54  authority                    Pubkey",
+      "54..56  padding                      u16",
+      "56..    addresses                    Pubkey[] packed, 32 bytes each"
+    ]
+  }
+}

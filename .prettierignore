@@ -6,3 +6,6 @@ package-lock.json
 CHANGELOG.md
 README.zh-TW.md
 docs/
+signer-rs/target/
+# Generated golden vectors — their byte stability must not depend on the Prettier version.
+signer-rs/crates/*/tests/fixtures/

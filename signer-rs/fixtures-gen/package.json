@@ -1,0 +1,13 @@
+{
+  "name": "signer-rs-fixtures-gen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generates golden-vector fixtures for the Rust signer port from the live TypeScript implementation.",
+  "scripts": {
+    "generate": "npm run generate:crypto && npm run generate:tx && npm run generate:sim",
+    "generate:crypto": "ts-node --project tsconfig.json gen-crypto-vectors.ts",
+    "generate:tx": "ts-node --project tsconfig.json gen-tx-vectors.ts",
+    "generate:sim": "ts-node --project tsconfig.json gen-sim-log-vectors.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
