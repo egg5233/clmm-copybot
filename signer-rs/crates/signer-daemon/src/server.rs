@@ -26,6 +26,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use nix::unistd::Uid;
 use signer_core::error::ProtocolError;
 use signer_core::protocol::{read_frame, write_frame, SignRequest, SignResponse};
 use signer_core::rpc::SolanaRpc;
@@ -60,6 +61,92 @@ const MAX_CONNECTIONS: usize = 8;
 /// here, since the client writes its request immediately on connect and hangs up
 /// after the response.
 const IDLE_TIMEOUT: Duration = Duration::from_mins(1);
+
+// ── Peer credentials ────────────────────────────────────────────────────────
+
+/// Whether the server holds connecting processes to its own uid.
+///
+/// [`PeerCheck::Off`] is the default and has to stay the default: `signer/index.ts`
+/// performs no such check, and [`SOCKET_MODE`] is `0660` precisely so the hardened
+/// install can run the bot as a *second* user in the signer's group. Turning this
+/// on narrows that to one user, which is right for the single-user install and
+/// wrong for the two-user one — so it is the operator's call, not this file's.
+///
+/// What it buys where it applies: the socket's mode is a check on the filesystem
+/// path, and a path can be reached by anything with the right group. `SO_PEERCRED`
+/// is a check on the process, taken by the kernel at `connect(2)` time and not
+/// forgeable by the peer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerCheck {
+    /// Serve anyone the socket's permissions let through.
+    Off,
+    /// Serve only processes whose uid matches this process's effective uid.
+    SameUid,
+}
+
+impl From<bool> for PeerCheck {
+    /// Maps `SignerConfig::require_peer_uid` onto the two states.
+    fn from(require: bool) -> Self {
+        if require {
+            Self::SameUid
+        } else {
+            Self::Off
+        }
+    }
+}
+
+/// Whether a freshly accepted connection may be served.
+///
+/// # Errors
+///
+/// A reason to log, for a connection that must be closed rather than answered.
+fn admit(stream: &UnixStream, peers: PeerCheck) -> Result<(), String> {
+    if peers == PeerCheck::Off {
+        return Ok(());
+    }
+
+    let peer = peer_uid(stream).map_err(|err| format!("could not read peer credentials: {err}"))?;
+    check_peer_uid(peer, Uid::effective())
+}
+
+/// Compares a peer's uid against this process's own.
+///
+/// Split from [`peer_uid`] so that both outcomes are testable. A test can only
+/// connect to itself, so the refusal branch has no in-process route to a real
+/// socket — see the note on [`tests::the_peer_check_lets_this_process_through`].
+fn check_peer_uid(peer: Uid, ours: Uid) -> Result<(), String> {
+    if peer == ours {
+        Ok(())
+    } else {
+        Err(format!("peer uid {peer} is not {ours}"))
+    }
+}
+
+/// The uid of the process on the other end of `stream`, from `SO_PEERCRED`.
+///
+/// The kernel fills these credentials in at `connect(2)`, so they describe the
+/// process that actually opened the connection and cannot be set by it.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn peer_uid(stream: &UnixStream) -> io::Result<Uid> {
+    let credentials =
+        nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::PeerCredentials)
+            .map_err(io::Error::from)?;
+    Ok(Uid::from_raw(credentials.uid()))
+}
+
+/// `SO_PEERCRED` is a Linux socket option; other platforms spell this differently.
+///
+/// Fails closed on purpose. With [`PeerCheck::SameUid`] asked for and no way to
+/// honour it, every connection is refused and every refusal is logged — an
+/// operator who asked for the guarantee gets it or gets a daemon that plainly
+/// does not work, never a flag that quietly does nothing.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn peer_uid(_stream: &UnixStream) -> io::Result<Uid> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "SO_PEERCRED is a Linux socket option; SIGNER_REQUIRE_PEER_UID cannot be honoured here",
+    ))
+}
 
 /// Everything a request needs answering: the key, the policy, and the chain.
 ///
@@ -129,7 +216,7 @@ pub fn bind(socket_path: &Path) -> Result<UnixListener, String> {
 /// Never returns: the only way out is the signal handler installed in `main`,
 /// which unlinks the socket and exits. Taking the listener by reference is what
 /// lets a test spawn this on a thread against a socket of its own.
-pub fn serve(listener: &UnixListener, signer: &Arc<Signer>) {
+pub fn serve(listener: &UnixListener, signer: &Arc<Signer>, peers: PeerCheck) {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let requests = Arc::new(AtomicU64::new(0));
 
@@ -149,6 +236,14 @@ pub fn serve(listener: &UnixListener, signer: &Arc<Signer>) {
                 continue;
             }
         };
+
+        // Refused before the connection reaches a thread and before a single
+        // byte is read from it: dropping `stream` here closes it, and the peer
+        // sees the connection go away without ever being asked for a request.
+        if let Err(reason) = admit(&stream, peers) {
+            warn!("Refusing connection: {reason}");
+            continue;
+        }
 
         let signer = Arc::clone(signer);
         let requests = Arc::clone(&requests);
@@ -394,12 +489,17 @@ mod tests {
 
     /// Starts a server on a fresh socket and returns it with its signing key.
     fn start() -> (TempSocket, Arc<Keypair>) {
+        start_with(PeerCheck::Off)
+    }
+
+    /// The same, with the peer check in a chosen state.
+    fn start_with(peers: PeerCheck) -> (TempSocket, Arc<Keypair>) {
         let socket = temp_socket();
         let keypair = Arc::new(Keypair::new());
 
         let listener = bind(&socket.0).expect("bind should succeed");
         let served = signer(Arc::clone(&keypair));
-        thread::spawn(move || serve(&listener, &served));
+        thread::spawn(move || serve(&listener, &served, peers));
 
         (socket, keypair)
     }
@@ -623,6 +723,60 @@ mod tests {
         for (index, client) in clients.into_iter().enumerate() {
             assert!(client.join().expect("no client panicked"), "client {index}");
         }
+    }
+
+    // ── Peer credentials ────────────────────────────────────────────────────
+
+    #[test]
+    fn the_peer_check_lets_this_process_through() {
+        // Every connection a test can make comes from this process, so the uid
+        // always matches and the *accept* branch is all that can be reached from
+        // a real socket. What this pins down is that the branch runs at all: the
+        // request below is answered only if `admit` read the peer's credentials
+        // off the socket and was satisfied by them. Refusal is covered by
+        // `a_peer_uid_that_is_not_ours_is_refused`, against the decision function
+        // rather than a socket, because a connection from another uid needs a
+        // second user and the privilege to become it.
+        let (socket, keypair) = start_with(PeerCheck::SameUid);
+        let mut client = connect(&socket);
+
+        send(
+            &mut client,
+            &request_json("legacy", &unsigned_transfer(&keypair)),
+        );
+        let response = read_response(&mut client);
+        assert_eq!(response["ok"], Value::Bool(true), "{response}");
+    }
+
+    #[test]
+    fn a_peer_uid_that_is_not_ours_is_refused() {
+        let ours = Uid::from_raw(1000);
+        assert!(check_peer_uid(ours, ours).is_ok());
+
+        let err = check_peer_uid(Uid::from_raw(1001), ours)
+            .expect_err("a different uid must not be served");
+        assert_eq!(err, "peer uid 1001 is not 1000");
+    }
+
+    #[test]
+    fn the_peer_check_is_off_unless_the_config_asks_for_it() {
+        assert_eq!(PeerCheck::from(false), PeerCheck::Off);
+        assert_eq!(PeerCheck::from(true), PeerCheck::SameUid);
+    }
+
+    #[test]
+    fn admit_waves_every_connection_through_when_the_check_is_off() {
+        let socket = temp_socket();
+        let listener = bind(&socket.0).expect("bind should succeed");
+        let accepted = thread::spawn(move || listener.accept().expect("a client is connecting").0);
+        let _client = UnixStream::connect(&socket.0).expect("server should be accepting");
+
+        let stream = accepted.join().expect("accept did not panic");
+        assert!(admit(&stream, PeerCheck::Off).is_ok());
+        assert!(
+            admit(&stream, PeerCheck::SameUid).is_ok(),
+            "and through the check too, since the peer is this process"
+        );
     }
 
     #[test]

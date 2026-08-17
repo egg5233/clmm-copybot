@@ -66,7 +66,7 @@ The design assumption is that a bot which parses untrusted on-chain data and cal
   - transaction simulation with CPI discovery — programs invoked indirectly must also pass the allowlist.
 - **Trust boundary.** Compromise of the bot process does not yield the key, and constrains an attacker to the operations the policy allows. The model does _not_ defend against compromise of the host itself or of an allowlisted on-chain program.
 
-This is the same problem shape as permission systems for autonomous AI agents: an untrusted automated process, a policy layer with hard guarantees, and a human-in-the-loop unlock step. A Rust rewrite of the signer with a differential compatibility harness lives in [`signer-rs/`](signer-rs/) _(in progress — see Roadmap)_.
+This is the same problem shape as permission systems for autonomous AI agents: an untrusted automated process, a policy layer with hard guarantees, and a human-in-the-loop unlock step. A **Rust rewrite of the signer** lives in [`signer-rs/`](signer-rs/): a drop-in daemon verified byte-for-byte against the TypeScript implementation by golden vectors and a differential harness, fixing six security gaps found during the port (frame-size cap, pipelined-frame stall, unenforced SPL `Approve`, key zeroization, unlock rate limiting, opt-in socket peer authentication). See [signer-rs/README.md](signer-rs/README.md) for the design write-up.
 
 ## Features
 
@@ -117,7 +117,7 @@ src/
 ├── discord/                 # notifications via self-hosted worker proxy
 └── utils/                   # wallet abstraction (signer client), logger, ratio math
 signer/                      # out-of-process signing daemon (TypeScript)
-signer-rs/                   # Rust rewrite of the signer (in progress)
+signer-rs/                   # Rust rewrite: drop-in daemon + differential harness
 tests/                       # regression tests (one per production incident)
 docs/                        # design documents
 ```
@@ -130,12 +130,12 @@ docs/                        # design documents
 
 ## Roadmap
 
-| Item                                                                                                                                    | Status      |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| Vitest migration + lint + CI                                                                                                            | in progress |
-| **Rust signer** (`signer-rs/`): drop-in daemon, differential test harness vs the TS implementation, byte-identical signing verification | in progress |
-| **Postgres persistence**: replace JSON-file state with a repository layer, migrations, docker-compose                                   | planned     |
-| Prometheus metrics + health endpoints                                                                                                   | planned     |
+| Item                                                                                                                                    | Status                               |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| Vitest migration + lint + CI                                                                                                            | done — 141 tests                     |
+| **Rust signer** (`signer-rs/`): drop-in daemon, differential test harness vs the TS implementation, byte-identical signing verification | done — 170 tests, 18/18 differential |
+| **Postgres persistence**: replace JSON-file state with a repository layer, migrations, docker-compose                                   | in progress                          |
+| Prometheus metrics + health endpoints                                                                                                   | planned                              |
 
 ## License
 

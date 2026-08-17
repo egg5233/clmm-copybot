@@ -104,7 +104,11 @@ fn main() -> ExitCode {
         Box::new(rpc_client::HttpRpc::new(&config.rpc_url)),
     ));
 
-    server::serve(&listener, &signer);
+    server::serve(
+        &listener,
+        &signer,
+        server::PeerCheck::from(config.require_peer_uid),
+    );
     ExitCode::SUCCESS
 }
 
@@ -164,6 +168,15 @@ fn print_banner(config: &SignerConfig, keypair: &Arc<solana_sdk::signer::keypair
         "Destination whitelist: {} addresses",
         policy.destination_whitelist.len()
     );
+    // Said only when it is on. Off is the default and the drop-in behaviour, so
+    // a line about it every start would be noise; on is a departure from what
+    // `signer/index.ts` does and belongs in the log the operator reads back.
+    if config.require_peer_uid {
+        info!(
+            "Peer uid check: connections must come from uid {}",
+            nix::unistd::Uid::effective()
+        );
+    }
     if policy.destination_whitelist.is_empty() {
         // Not a misconfiguration: with no whitelist the only standalone SPL
         // transfers that clear the policy are the ones whose destination the

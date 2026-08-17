@@ -30,6 +30,8 @@ pub const ENV_UNLOCK_PORT: &str = "SIGNER_UNLOCK_PORT";
 pub const ENV_DEST_WHITELIST: &str = "SIGNER_DEST_WHITELIST";
 /// Log verbosity: `debug`, `info`, `warn` or `error`.
 pub const ENV_LOG_LEVEL: &str = "SIGNER_LOG_LEVEL";
+/// Refuse socket connections from a process running as another user. Off unless set.
+pub const ENV_REQUIRE_PEER_UID: &str = "SIGNER_REQUIRE_PEER_UID";
 /// Override for the Byreal program ID — the one allowlist entry that is not fixed.
 pub const ENV_BYREAL_PROGRAM_ID: &str = "BYREAL_PROGRAM_ID";
 
@@ -219,6 +221,13 @@ pub struct SignerConfig {
     pub unlock_port: u16,
     /// Log verbosity.
     pub log_level: LogLevel,
+    /// Whether to serve only processes running as this daemon's own user.
+    ///
+    /// Off unless `SIGNER_REQUIRE_PEER_UID` says otherwise, because off is what
+    /// keeps the daemon a drop-in replacement: `signer/index.ts` performs no such
+    /// check, and the 0660 socket mode exists precisely so a bot running as a
+    /// second user in the same group can connect.
+    pub require_peer_uid: bool,
 }
 
 impl SignerConfig {
@@ -282,6 +291,15 @@ impl SignerConfig {
             })?,
         };
 
+        let require_peer_uid = match get(ENV_REQUIRE_PEER_UID) {
+            None => false,
+            Some(raw) => parse_flag(&raw).ok_or_else(|| ConfigError::InvalidValue {
+                var: ENV_REQUIRE_PEER_UID,
+                value: raw.clone(),
+                reason: "expected one of 1|0|true|false|yes|no|on|off".to_owned(),
+            })?,
+        };
+
         Ok(Self {
             socket_path,
             rpc_url,
@@ -289,6 +307,7 @@ impl SignerConfig {
             destination_whitelist,
             unlock_port,
             log_level,
+            require_peer_uid,
         })
     }
 
@@ -296,6 +315,24 @@ impl SignerConfig {
     #[must_use]
     pub fn web_unlock_enabled(&self) -> bool {
         self.unlock_port > 0
+    }
+}
+
+/// Parse an on/off environment variable, or `None` for a spelling not on the list.
+///
+/// Deliberately not JavaScript truthiness. Every other variable here follows
+/// `process.env` semantics because the TypeScript signer reads it that way, but
+/// this one has no TypeScript counterpart to match, and under those rules
+/// `SIGNER_REQUIRE_PEER_UID=0` and `=false` are non-empty strings and would
+/// therefore *enable* the check. For a security control that reads backwards.
+/// An unrecognised value is a boot failure rather than a guess, for the same
+/// reason a malformed whitelist entry is: silently doing the opposite of what an
+/// operator wrote is the failure mode worth ruling out.
+fn parse_flag(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 
@@ -579,6 +616,54 @@ mod tests {
         assert!(matches!(
             err,
             ConfigError::InvalidValue { var, .. } if var == ENV_LOG_LEVEL
+        ));
+    }
+
+    // ── Peer uid check ──────────────────────────────────────────────────────
+
+    #[test]
+    fn peer_uid_check_is_off_unless_asked_for() {
+        assert!(
+            !minimal().require_peer_uid,
+            "off is what keeps the daemon a drop-in replacement"
+        );
+    }
+
+    #[test]
+    fn peer_uid_check_accepts_the_usual_spellings() {
+        for (raw, expected) in [
+            ("1", true),
+            ("true", true),
+            ("TRUE", true),
+            ("yes", true),
+            ("on", true),
+            (" on ", true),
+            ("0", false),
+            ("false", false),
+            ("no", false),
+            ("off", false),
+        ] {
+            let config = config_from(&[
+                (ENV_RPC_URL, "http://localhost:8899"),
+                (ENV_REQUIRE_PEER_UID, raw),
+            ]);
+            assert_eq!(config.require_peer_uid, expected, "for {raw:?}");
+        }
+    }
+
+    #[test]
+    fn peer_uid_check_rejects_a_value_it_cannot_read() {
+        // The failure this guards: under JS truthiness "disabled" is a non-empty
+        // string and would switch the check *on*. Refusing to boot is the only
+        // answer that cannot be the opposite of what the operator meant.
+        let err = SignerConfig::from_env_with(&env(&[
+            (ENV_RPC_URL, "http://localhost:8899"),
+            (ENV_REQUIRE_PEER_UID, "disabled"),
+        ]))
+        .expect_err("an unrecognised spelling must not be guessed at");
+        assert!(matches!(
+            err,
+            ConfigError::InvalidValue { var, .. } if var == ENV_REQUIRE_PEER_UID
         ));
     }
 

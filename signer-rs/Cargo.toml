@@ -17,6 +17,7 @@ bincode = "1"
 bs58 = "0.5"
 dotenvy = "0.15"
 hex = "0.4"
+nix = { version = "0.31", default-features = false, features = ["socket", "user"] }
 regex = "1"
 rpassword = "7"
 scrypt = "0.11"

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.34.0 (2026-08-18)
+
+- **[Feature] Rust signer (`signer-rs/`)**: drop-in rewrite of the signing daemon — same Unix-socket protocol, keyfile format, and env contract; the unmodified bot signs through it byte-identically. Verified by golden vectors generated from the TS implementation and an 18-case differential harness driving both signers with the bot's real client code (170 Rust tests).
+- **[Security] Six gaps found in the TS signer during the port, fixed in Rust**: 64 KiB frame cap (unbounded-buffer OOM), pipelined-frame stall (`if`→`while`), SPL `Approve` now enforced (was log-only), key material zeroized, exponential backoff on unlock attempts, opt-in `SO_PEERCRED` peer check (`SIGNER_REQUIRE_PEER_UID`).
+- **[Docs] `signer-rs/README.md`** design write-up (sync-over-tokio rationale, 16-byte GCM IV compatibility, fidelity-vs-change tables, threat model); `CLAUDE.md` + `docs/agentic-workflow.md`.
+
 ## v1.33.0 (2026-08-17)
 - **[Infra] Test suite migrated to vitest**: replaced the 20-command `ts-node` chain with vitest (`npm test`); shared env stubs moved to `tests/setup.ts`; floating-promise bugs in async tests fixed by converting to awaited `it()` blocks.
 - **[Infra] Source-grep tests retired**: 13 tests that asserted on source-code substrings were either rewritten as behavioral tests (audit queue, position cap, priority-fee strip, claim CLI parity, fee-payload audit, Jupiter headers, zero-priority builder) or deleted; every retired file's regression intent is recorded in `docs/testing-notes.md`.
