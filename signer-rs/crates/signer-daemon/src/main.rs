@@ -3,13 +3,12 @@
 //! Reads its configuration, unlocks the encrypted keyfile, and serves signing
 //! requests on a Unix socket — the runnable half of `signer/index.ts`.
 //!
-//! **M3 status: the policy engine is not wired yet.** Every well-formed
-//! transaction is signed. The daemon says so loudly at startup and must not be
-//! pointed at a wallet holding funds until M5 lands.
+//! **M5 status: the policy engine is wired.** Every request is resolved,
+//! checked against the program allowlist and the SPL rules, and simulated before
+//! a signature is produced.
 //!
-//! Two things are still missing besides policy: the localhost unlock page (M6 —
-//! until then the password is read from stdin whatever `SIGNER_UNLOCK_PORT`
-//! says) and RPC simulation, which the policy engine needs.
+//! One thing is still missing: the localhost unlock page (M6 — until then the
+//! password is read from stdin whatever `SIGNER_UNLOCK_PORT` says).
 //!
 //! All logging goes to stderr. `signer/index.ts` splits it across stdout and
 //! stderr the way `console.log`/`console.error` do, but this process emits no
@@ -23,6 +22,7 @@ use std::{fs, path::PathBuf, thread};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use signer_core::config::{PolicyConfig, SignerConfig};
+use signer_core::PolicyEngine;
 
 /// Logs a lifecycle or per-request event.
 macro_rules! info {
@@ -40,6 +40,7 @@ macro_rules! error {
 }
 
 mod key_load;
+mod rpc_client;
 mod server;
 
 /// `.env` files to load, in the order the TypeScript signer loads them
@@ -88,7 +89,16 @@ fn main() -> ExitCode {
     install_signal_handlers(config.socket_path.clone());
     print_banner(&config, &keypair);
 
-    server::serve(&listener, &keypair);
+    // Built here rather than inside `serve` so the RPC endpoint and the
+    // allowlists are read from configuration exactly once, at startup, and a
+    // connection thread has no way to reach the environment.
+    let signer = Arc::new(server::Signer::new(
+        keypair,
+        PolicyEngine::new(PolicyConfig::from(&config)),
+        Box::new(rpc_client::HttpRpc::new(&config.rpc_url)),
+    ));
+
+    server::serve(&listener, &signer);
     ExitCode::SUCCESS
 }
 
@@ -148,8 +158,14 @@ fn print_banner(config: &SignerConfig, keypair: &Arc<solana_sdk::signer::keypair
         "Destination whitelist: {} addresses",
         policy.destination_whitelist.len()
     );
-    warn!("POLICY ENGINE NOT WIRED (M5) — every well-formed transaction will be signed.");
-    warn!("Do not run this build against a wallet holding funds.");
+    if policy.destination_whitelist.is_empty() {
+        // Not a misconfiguration: with no whitelist the only standalone SPL
+        // transfers that clear the policy are the ones whose destination the
+        // chain vouches for. Worth saying out loud, because an operator who
+        // meant to configure the daily auto-convert target and did not will
+        // otherwise find out when the transfer is refused.
+        warn!("No destination whitelist — standalone SPL transfers will be refused.");
+    }
 }
 
 /// Strip credentials from an RPC URL before logging it.

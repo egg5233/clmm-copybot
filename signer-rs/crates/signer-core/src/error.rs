@@ -147,8 +147,15 @@ pub enum PolicyError {
     ApproveToNonWhitelistedDelegate(Pubkey),
 
     /// Simulation logs revealed a CPI into a program outside the allowlist.
+    ///
+    /// Carries text rather than a [`Pubkey`] because that is what the log line
+    /// held. The pattern that finds these ids is looser than base58
+    /// ([`crate::policy::simulation`]), so a capture that is not a valid pubkey
+    /// is possible — and it is refused for the same reason a valid one off the
+    /// allowlist is. Reporting the characters that were actually in the log is
+    /// what makes the rejection something an operator can search for.
     #[error("Simulation revealed unknown invoked program: {0}")]
-    UnknownInvokedProgram(Pubkey),
+    UnknownInvokedProgram(String),
 
     /// A bare SPL transfer (no DEX instruction alongside it) to an unknown address.
     #[error("Standalone SPL transfer to non-whitelisted address: {0}")]

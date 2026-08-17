@@ -28,7 +28,9 @@ use std::time::{Duration, Instant};
 
 use signer_core::error::ProtocolError;
 use signer_core::protocol::{read_frame, write_frame, SignRequest, SignResponse};
+use signer_core::rpc::SolanaRpc;
 use signer_core::tx::ParsedTx;
+use signer_core::{PolicyEngine, Verdict};
 use solana_sdk::signer::keypair::Keypair;
 
 /// Socket permissions: owner and group only (`signer/index.ts:317`).
@@ -58,6 +60,31 @@ const MAX_CONNECTIONS: usize = 8;
 /// here, since the client writes its request immediately on connect and hangs up
 /// after the response.
 const IDLE_TIMEOUT: Duration = Duration::from_mins(1);
+
+/// Everything a request needs answering: the key, the policy, and the chain.
+///
+/// Bundled rather than passed as three arguments because every connection thread
+/// needs all three for the lifetime of the connection, and one `Arc` to clone per
+/// thread is cheaper and harder to get wrong than three. Shared immutably — the
+/// engine holds only configuration and the RPC client is internally
+/// synchronised — so nothing here needs a lock.
+pub struct Signer {
+    keypair: Arc<Keypair>,
+    policy: PolicyEngine,
+    rpc: Box<dyn SolanaRpc>,
+}
+
+impl Signer {
+    /// Assembles the three pieces of a signing service.
+    #[must_use]
+    pub fn new(keypair: Arc<Keypair>, policy: PolicyEngine, rpc: Box<dyn SolanaRpc>) -> Self {
+        Self {
+            keypair,
+            policy,
+            rpc,
+        }
+    }
+}
 
 /// Prepares the listening socket: clear a stale path, bind, restrict the mode.
 ///
@@ -102,7 +129,7 @@ pub fn bind(socket_path: &Path) -> Result<UnixListener, String> {
 /// Never returns: the only way out is the signal handler installed in `main`,
 /// which unlinks the socket and exits. Taking the listener by reference is what
 /// lets a test spawn this on a thread against a socket of its own.
-pub fn serve(listener: &UnixListener, keypair: &Arc<Keypair>) {
+pub fn serve(listener: &UnixListener, signer: &Arc<Signer>) {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let requests = Arc::new(AtomicU64::new(0));
 
@@ -123,13 +150,13 @@ pub fn serve(listener: &UnixListener, keypair: &Arc<Keypair>) {
             }
         };
 
-        let keypair = Arc::clone(keypair);
+        let signer = Arc::clone(signer);
         let requests = Arc::clone(&requests);
         if let Err(err) = thread::Builder::new()
             .name("signer-conn".to_owned())
             .spawn(move || {
                 let _permit = permit;
-                handle_connection(&stream, &keypair, &requests);
+                handle_connection(&stream, &signer, &requests);
             })
         {
             warn!("Could not spawn connection thread: {err}");
@@ -142,7 +169,7 @@ pub fn serve(listener: &UnixListener, keypair: &Arc<Keypair>) {
 /// The server never closes first on the happy path — `sendToSigner` destroys the
 /// socket once it has its response, and a server-side close would race that and
 /// surface in the bot as `ECONNRESET` instead of a clean result.
-fn handle_connection(stream: &UnixStream, keypair: &Keypair, requests: &AtomicU64) {
+fn handle_connection(stream: &UnixStream, signer: &Signer, requests: &AtomicU64) {
     if let Err(err) = stream.set_read_timeout(Some(IDLE_TIMEOUT)) {
         warn!("Could not set read timeout: {err}");
     }
@@ -161,7 +188,7 @@ fn handle_connection(stream: &UnixStream, keypair: &Keypair, requests: &AtomicU6
             Ok(None) => return,
 
             Ok(Some(frame)) => {
-                let response = handle_request(&frame, keypair, requests);
+                let response = handle_request(&frame, signer, requests);
                 if let Err(err) = write_frame(&mut writer, &response.to_json_bytes()) {
                     warn!("Could not write response: {err}");
                     return;
@@ -209,11 +236,11 @@ fn is_idle_timeout(err: &ProtocolError) -> bool {
 /// which is where the ported error strings pay off: the bot re-throws that text
 /// verbatim (`src/utils/wallet.ts:113`), so it lands in the logs and the Discord
 /// alerts exactly as the TypeScript signer would have written it.
-fn handle_request(frame: &[u8], keypair: &Keypair, requests: &AtomicU64) -> SignResponse {
+fn handle_request(frame: &[u8], signer: &Signer, requests: &AtomicU64) -> SignResponse {
     let id = requests.fetch_add(1, Ordering::Relaxed) + 1;
     let started = Instant::now();
 
-    match sign_frame(frame, keypair, id) {
+    match sign_frame(frame, signer, id) {
         Ok(response) => {
             info!("[#{id}] SIGNED ({}ms)", started.elapsed().as_millis());
             response
@@ -225,13 +252,16 @@ fn handle_request(frame: &[u8], keypair: &Keypair, requests: &AtomicU64) -> Sign
     }
 }
 
-/// Parse → validate → decode → (policy) → sign → encode.
+/// Parse → validate → decode → policy → sign → encode.
 ///
 /// Errors are boxed rather than unified into one enum because nothing branches
-/// on them: the caller only ever renders `Display` into the response.
+/// on them: the caller only ever renders `Display` into the response. A policy
+/// rejection joins them as its reason string, so it is logged and answered
+/// exactly like a malformed request — `signer/index.ts:241-245` treats the two
+/// the same way, and the difference that matters to the bot is `ok: false`.
 fn sign_frame(
     frame: &[u8],
-    keypair: &Keypair,
+    signer: &Signer,
     id: u64,
 ) -> Result<SignResponse, Box<dyn std::error::Error>> {
     let request = SignRequest::from_json(frame)?;
@@ -239,14 +269,12 @@ fn sign_frame(
     let tx_bytes = request.decode_tx()?;
     info!("[#{id}] {kind} TX ({} bytes)", tx_bytes.len());
 
-    // TODO(M5): wire PolicyEngine — `checkPolicy` runs here in the TypeScript
-    // signer (`signer/index.ts:241-245`), rejecting unknown programs, SPL
-    // transfers to addresses off the whitelist, and anything simulation shows
-    // reaching a program off the allowlist. Until that lands this daemon signs
-    // every well-formed transaction it is handed, and must not be pointed at a
-    // wallet holding funds.
     let mut tx = ParsedTx::parse(kind, &tx_bytes)?;
-    tx.sign_with(keypair)?;
+    if let Verdict::Deny { reason } = signer.policy.check(&tx, signer.rpc.as_ref()) {
+        return Err(reason.into());
+    }
+
+    tx.sign_with(&signer.keypair)?;
     Ok(SignResponse::signed(&tx.to_bytes()?))
 }
 
@@ -314,6 +342,10 @@ mod tests {
 
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     use serde_json::Value;
+    use signer_core::config::{
+        dex_programs, program_allowlist, PolicyConfig, BYREAL_CLMM, JUPITER_V6, SYSTEM_PROGRAM,
+    };
+    use signer_core::rpc::MockRpc;
     use signer_core::tx::TxKind;
     use solana_sdk::hash::Hash;
     use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -343,13 +375,30 @@ mod tests {
         TempSocket(std::env::temp_dir().join(name))
     }
 
+    /// The daemon's own policy, against a chain where nothing exists.
+    ///
+    /// [`MockRpc`] answers every account read with "not found" and every
+    /// simulation with an empty log, which is what keeps these tests about the
+    /// socket: the transactions below are ones the policy clears without needing
+    /// the network to vouch for anything. `simulation_tests.rs` is where the
+    /// verdicts themselves are pinned down.
+    fn signer(keypair: Arc<Keypair>) -> Arc<Signer> {
+        let policy = PolicyEngine::new(PolicyConfig {
+            program_allowlist: program_allowlist(BYREAL_CLMM),
+            dex_programs: dex_programs(BYREAL_CLMM),
+            destination_whitelist: std::collections::HashSet::new(),
+            jupiter: JUPITER_V6,
+        });
+        Arc::new(Signer::new(keypair, policy, Box::new(MockRpc::new())))
+    }
+
     /// Starts a server on a fresh socket and returns it with its signing key.
     fn start() -> (TempSocket, Arc<Keypair>) {
         let socket = temp_socket();
         let keypair = Arc::new(Keypair::new());
 
         let listener = bind(&socket.0).expect("bind should succeed");
-        let served = Arc::clone(&keypair);
+        let served = signer(Arc::clone(&keypair));
         thread::spawn(move || serve(&listener, &served));
 
         (socket, keypair)
@@ -357,14 +406,35 @@ mod tests {
 
     /// An unsigned legacy transaction `payer` is the sole signer of.
     ///
-    /// The instruction's program and data are arbitrary — M3 signs whatever
-    /// parses, and what is under test is the socket round trip, not the payload.
+    /// A System transfer: the smallest payload that is both signable and
+    /// policy-clean, since the System program is on the allowlist and a lamport
+    /// move is not an SPL token instruction. What is under test is the socket
+    /// round trip, not the payload — but the payload has to survive the policy
+    /// to get as far as a signature.
     fn unsigned_transfer(payer: &Keypair) -> Vec<u8> {
+        // `System::Transfer { lamports: 1000 }`, hand-encoded: a u32
+        // discriminator then a u64 amount. `solana_sdk::system_instruction` is
+        // deprecated in favour of a crate the daemon has no other use for.
+        let mut data = 2u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&1_000u64.to_le_bytes());
+
         let instruction = Instruction::new_with_bytes(
-            Pubkey::new_unique(),
-            &[1, 2, 3],
-            vec![AccountMeta::new(payer.pubkey(), true)],
+            SYSTEM_PROGRAM,
+            &data,
+            vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(Pubkey::new_unique(), false),
+            ],
         );
+        let message = Message::new(&[instruction], Some(&payer.pubkey()));
+        let mut tx = Transaction::new_unsigned(message);
+        tx.message.recent_blockhash = Hash::new_from_array([7u8; 32]);
+        ParsedTx::Legacy(tx).to_bytes().expect("encodes")
+    }
+
+    /// The same shape, calling a program the allowlist has never heard of.
+    fn unsigned_call_to(program: Pubkey, payer: &Keypair) -> Vec<u8> {
+        let instruction = Instruction::new_with_bytes(program, &[1, 2, 3], Vec::new());
         let message = Message::new(&[instruction], Some(&payer.pubkey()));
         let mut tx = Transaction::new_unsigned(message);
         tx.message.recent_blockhash = Hash::new_from_array([7u8; 32]);
@@ -456,6 +526,29 @@ mod tests {
             &request_json("legacy", &unsigned_transfer(&keypair)),
         );
         assert_eq!(read_response(&mut client)["ok"], Value::Bool(true));
+    }
+
+    #[test]
+    fn a_transaction_the_policy_refuses_is_answered_with_its_reason() {
+        // The seam this test guards is the wiring, not the rule: a rejection
+        // from `PolicyEngine` has to reach the wire as `ok: false` carrying the
+        // reason verbatim, rather than being logged and signed anyway.
+        let (socket, keypair) = start();
+        let mut client = connect(&socket);
+        let program = Pubkey::new_unique();
+
+        send(
+            &mut client,
+            &request_json("legacy", &unsigned_call_to(program, &keypair)),
+        );
+
+        let response = read_response(&mut client);
+        assert_eq!(response["ok"], Value::Bool(false), "{response}");
+        assert_eq!(
+            response["error"].as_str(),
+            Some(format!("Unknown program: {program}").as_str())
+        );
+        assert!(response["tx"].is_null(), "a refusal carries no transaction");
     }
 
     #[test]

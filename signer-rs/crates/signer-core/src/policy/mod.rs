@@ -5,8 +5,9 @@
 //! transactions and is the thing most likely to be compromised; the signer holds
 //! the key and never trusts what it is handed.
 //!
-//! `checkPolicy` runs three passes. The first two need no network beyond an
-//! account read and are implemented here as [`PolicyEngine::check_static`]:
+//! `checkPolicy` runs three passes. [`PolicyEngine::check`] runs all three in
+//! order; the first two need no network beyond an account read and are
+//! [`PolicyEngine::check_static`]:
 //!
 //! 1. **Program allowlist.** Every top-level instruction must invoke a program on
 //!    the list ([`crate::config::program_allowlist`]). This is the coarse filter —
@@ -14,12 +15,9 @@
 //! 2. **SPL token rules.** Within the two token programs, `SetAuthority` is always
 //!    refused, `Approve` and `Transfer`/`TransferChecked` are refused unless the
 //!    delegate or destination clears [`spl`]'s chain of exemptions.
-//!
-//! The third pass — simulate, then re-check every program the logs show was
-//! actually invoked via CPI — is milestone M5. It hangs off the same [`Verdict`]:
-//! [`Verdict::Allow`] carries `has_dex_instruction`, which the simulation pass
-//! needs for its Jupiter exemption (`policy.ts:200-211`), so the static pass does
-//! not have to be re-walked to recover it.
+//! 3. **Post-simulation CPI check.** Simulate, then hold every program the logs
+//!    show was actually invoked to the same allowlist — see [`simulation`], which
+//!    is also where the reasons simulation is otherwise non-fatal are set out.
 //!
 //! # Ordering
 //!
@@ -27,14 +25,18 @@
 //! check, exactly as in the TypeScript, so an unknown program anywhere in a
 //! transaction outranks a `SetAuthority` earlier in it. Within the SPL pass the
 //! first offending instruction decides, and inside a transfer the exemptions are
-//! tried in the TypeScript's order — see [`spl::check`].
+//! tried in the TypeScript's order — see [`spl::check`]. Simulation runs last and
+//! only for a transaction that already cleared both static passes, so the
+//! expensive check never runs for a transaction that was going to be refused.
 
+pub mod simulation;
 pub mod spl;
 
-use crate::alt::ResolvedTx;
+use crate::alt::{self, ResolvedTx};
 use crate::config::PolicyConfig;
 use crate::error::PolicyError;
 use crate::rpc::SolanaRpc;
+use crate::tx::ParsedTx;
 
 /// The outcome of a policy pass.
 ///
@@ -49,10 +51,14 @@ pub enum Verdict {
     Allow {
         /// Whether a known DEX program appears among the top-level instructions.
         ///
-        /// Relaxes the transfer-destination rule (a token move inside a swap or LP
-        /// flow is expected), and M5's simulation pass reads it for the same
-        /// reason. Reported even when no transfer was present, so the caller never
-        /// has to re-derive it.
+        /// Relaxes the transfer-destination rule: a token move inside a swap or
+        /// LP flow is expected. Reported even when no transfer was present, so
+        /// the caller never has to re-derive it.
+        ///
+        /// Not what [`simulation`] tests for. Its exemption is Jupiter
+        /// specifically (`policy.ts:200-204`), and Jupiter is one of the six DEX
+        /// programs — reusing this flag there would skip the CPI check for every
+        /// Orca, Meteora and Byreal transaction as well.
         has_dex_instruction: bool,
     },
     /// Refuse to sign.
@@ -109,6 +115,34 @@ impl PolicyEngine {
     #[must_use]
     pub fn config(&self) -> &PolicyConfig {
         &self.config
+    }
+
+    /// The whole of `checkPolicy`: resolve, check statically, simulate.
+    ///
+    /// This is the call the daemon makes, and the only one that sees a
+    /// transaction as it arrived rather than as [`ResolvedTx`]. Address lookup
+    /// tables are expanded first because every later check reads account keys
+    /// through them; a table that cannot be fetched is a rejection, since a
+    /// transaction whose accounts the signer cannot see is one it cannot vouch
+    /// for.
+    ///
+    /// The passes run in the TypeScript's order and the first rejection wins.
+    #[must_use]
+    pub fn check(&self, tx: &ParsedTx, rpc: &dyn SolanaRpc) -> Verdict {
+        let resolved = match alt::resolve(tx, rpc) {
+            Ok(resolved) => resolved,
+            Err(err) => return err.into(),
+        };
+
+        let verdict = self.check_static(&resolved, rpc);
+        if !verdict.is_allowed() {
+            return verdict;
+        }
+
+        match simulation::check(&self.config, tx, &resolved, rpc) {
+            Some(err) => err.into(),
+            None => verdict,
+        }
     }
 
     /// Runs the allowlist and SPL passes.

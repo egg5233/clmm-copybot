@@ -16,6 +16,7 @@ dotenvy.workspace = true
 rpassword.workspace = true
 signal-hook.workspace = true
 signer-core.workspace = true
+solana-client.workspace = true
 solana-sdk.workspace = true
 
 [dev-dependencies]
