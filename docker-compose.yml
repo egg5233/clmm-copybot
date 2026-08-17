@@ -1,0 +1,109 @@
+# Local stack: Postgres, the bot, the Rust signer, and a one-shot migration run.
+#
+# Development uses only the database:
+#
+#   npm run db:start      # docker compose up -d postgres
+#   npm run migrate       # apply migrations from the host
+#   npm test
+#
+# `postgres` has no profile, so plain `docker compose up postgres` works and the
+# heavier services stay out of the way. Everything else sits behind the `bot`
+# profile: `docker compose --profile bot up` brings up the full stack.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-copybot}
+      POSTGRES_USER: ${POSTGRES_USER:-copybot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-copybot}
+    ports:
+      # Host port is configurable so a developer already running Postgres locally
+      # does not have to stop it.
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready, not a TCP probe: the container accepts connections briefly
+      # during initdb, before the database the bot needs actually exists.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-copybot} -d ${POSTGRES_DB:-copybot}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    # Same image as the bot: it already has node_modules and migrations/.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ['npm', 'run', 'migrate']
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-copybot}:${POSTGRES_PASSWORD:-copybot}@postgres:5432/${POSTGRES_DB:-copybot}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    profiles: ['bot', 'migrate']
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      # Not required, so `docker compose config` works in a fresh checkout where
+      # .env has not been created yet (it is gitignored — see .env.example).
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-copybot}:${POSTGRES_PASSWORD:-copybot}@postgres:5432/${POSTGRES_DB:-copybot}
+      SIGNER_SOCKET_PATH: /run/signer/signer.sock
+    ports:
+      - '${DASHBOARD_PORT:-3847}:3847'
+    volumes:
+      # The two rebuildable caches that stay on disk, plus the instance lock.
+      - botdata:/app/data
+      - signer-socket:/run/signer
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        # Never start the bot against a schema that has not been applied.
+        condition: service_completed_successfully
+    restart: unless-stopped
+    profiles: ['bot']
+
+  signer:
+    build:
+      context: .
+      dockerfile: signer-rs/Dockerfile
+    environment:
+      # Required — the daemon refuses to start without it, and it is deliberately
+      # separate from the bot's RPC_URL so the signer can simulate against its own
+      # endpoint.
+      SIGNER_RPC_URL: ${SIGNER_RPC_URL:-}
+      SIGNER_SOCKET_PATH: /run/signer/signer.sock
+      # 0 disables the unlock page; unlock over stdin with
+      # `docker compose attach signer`. Set a port and publish it only if the
+      # dashboard is proxying the unlock flow.
+      SIGNER_UNLOCK_PORT: ${SIGNER_UNLOCK_PORT:-0}
+      SIGNER_LOG_LEVEL: ${SIGNER_LOG_LEVEL:-info}
+    volumes:
+      # The socket is shared through a named volume rather than a bind mount:
+      # both containers see the same inode, and the socket never touches the
+      # host filesystem where another process could connect to it.
+      - signer-socket:/run/signer
+      # The encrypted keyfile stays on the host, read-only. It is useless without
+      # the passphrase, which is never stored in the image or the environment.
+      - ./signer/keyfile.enc.json:/keys/keyfile.enc.json:ro
+    # The daemon waits for a passphrase on stdin when the unlock page is off.
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    profiles: ['bot']
+
+volumes:
+  pgdata:
+  botdata:
+  signer-socket:

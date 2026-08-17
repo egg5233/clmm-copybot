@@ -1,0 +1,13 @@
+.git/
+node_modules/
+signer/node_modules/
+signer-rs/target/
+dist/
+data/
+.env
+signer/.env
+*.log
+docs/
+tests/
+signer-rs/e2e/
+signer-rs/fixtures-gen/

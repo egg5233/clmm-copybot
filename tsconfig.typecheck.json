@@ -2,7 +2,15 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "."
+    "rootDir": ".",
+    // node-pg-migrate v9 publishes its types only through package.json "exports",
+    // which the node10 resolution implied by `module: commonjs` does not read —
+    // its `types` field points at a path that no longer exists. Mapping the one
+    // package keeps real types for tests/repo/global-setup.ts without switching
+    // resolution mode for the whole codebase and its five DEX SDKs.
+    "paths": {
+      "node-pg-migrate": ["./node_modules/node-pg-migrate/dist/bundle/index.d.ts"]
+    }
   },
   "include": ["src/**/*", "tests/**/*", "vitest.config.ts"]
 }

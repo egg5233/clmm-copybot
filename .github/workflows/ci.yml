@@ -8,6 +8,28 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # The repository suites under tests/repo/ run against a real Postgres. With
+    # DATABASE_URL set, tests/repo/global-setup.ts uses this service and skips its
+    # throwaway-container fallback (which is what runs on a developer's machine).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: copybot_test
+          POSTGRES_USER: copybot
+          POSTGRES_PASSWORD: copybot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U copybot -d copybot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://copybot:copybot@127.0.0.1:5432/copybot_test
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
