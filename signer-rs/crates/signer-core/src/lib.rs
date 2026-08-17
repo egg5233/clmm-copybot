@@ -8,10 +8,14 @@
 //! Deliberately free of `tokio`, sockets and HTTP so the security-relevant
 //! decisions stay unit-testable in isolation.
 
+pub mod alt;
 pub mod config;
 pub mod crypto;
 pub mod error;
+pub mod policy;
 pub mod protocol;
+pub mod rpc;
 pub mod tx;
 
 pub use config::{PolicyConfig, SignerConfig};
+pub use policy::{PolicyEngine, Verdict};

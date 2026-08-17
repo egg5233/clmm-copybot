@@ -1752,6 +1752,8 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "solana-account",
+ "solana-address-lookup-table-interface",
  "solana-sdk",
  "thiserror",
  "zeroize",

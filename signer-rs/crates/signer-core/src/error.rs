@@ -116,9 +116,35 @@ pub enum PolicyError {
     #[error("ALT resolution failed: {0}")]
     AltResolutionFailed(String),
 
+    /// An instruction's program id index points outside the resolved account list.
+    ///
+    /// No TypeScript counterpart: `extractProgramIds` guards the lookup with
+    /// `if (programId)` and the SPL loop with `?.`, so an out-of-range index makes
+    /// the instruction vanish from *both* the allowlist check and the transfer
+    /// check. The transaction could never execute — the runtime rejects such a
+    /// message during sanitization — so refusing to sign it costs nothing and is
+    /// the safer default for the one process holding the key.
+    #[error("Instruction {instruction} references program id index {index}, which is outside the transaction's account list")]
+    UnresolvableProgramId {
+        /// Position of the offending instruction in the message.
+        instruction: usize,
+        /// The account index the instruction named.
+        index: u16,
+    },
+
     /// SPL `SetAuthority` is never allowed — it can hand the wallet away.
     #[error("SPL SetAuthority is blocked — potential authority hijack")]
     SetAuthorityBlocked,
+
+    /// SPL `Approve` hands a delegate standing authority to move the account's
+    /// tokens, so it is held to the same bar as a transfer to that address.
+    ///
+    /// New enforcement: `policy.ts:130-135` only logs the delegate and comments
+    /// that unknown ones "should" be blocked. Nothing acts on it, which makes an
+    /// approve a strictly cheaper way to drain the wallet than the transfer the
+    /// same file does block.
+    #[error("SPL Approve to non-whitelisted delegate: {0}")]
+    ApproveToNonWhitelistedDelegate(Pubkey),
 
     /// Simulation logs revealed a CPI into a program outside the allowlist.
     #[error("Simulation revealed unknown invoked program: {0}")]
@@ -143,4 +169,41 @@ pub enum TxError {
     /// A lookup table referenced by the transaction is not on-chain.
     #[error("ALT account not found: {0}")]
     AltAccountNotFound(Pubkey),
+
+    /// A lookup table account exists but its data is not a lookup table.
+    #[error("ALT account is not a valid lookup table: {key} ({reason})")]
+    AltAccountMalformed {
+        /// Address of the account that was fetched.
+        key: Pubkey,
+        /// Why the lookup table layout could not be read.
+        reason: String,
+    },
+
+    /// A message indexed past the end of a lookup table's address list.
+    ///
+    /// Wording matches the `MessageV0.resolveAddressTableLookups` throw, which is
+    /// what surfaces from the TypeScript signer for the same input.
+    #[error("Failed to find address for index {index} in address lookup table {table}")]
+    AltIndexOutOfRange {
+        /// Address of the lookup table.
+        table: Pubkey,
+        /// The index the message asked for.
+        index: u8,
+    },
+}
+
+/// Failures reaching the RPC endpoint (`signer/policy.ts` via web3.js `Connection`).
+///
+/// A *missing* account is not an error — [`crate::rpc::SolanaRpc`] reports that as
+/// `Ok(None)`, because "this address holds nothing" is an answer the policy engine
+/// acts on rather than a failure to get one.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum RpcError {
+    /// The endpoint could not be reached, or refused the request.
+    #[error("RPC request failed: {0}")]
+    Transport(String),
+
+    /// The endpoint replied, but the payload could not be decoded.
+    #[error("RPC returned an unreadable response: {0}")]
+    Malformed(String),
 }
