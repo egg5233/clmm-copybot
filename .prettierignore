@@ -9,3 +9,6 @@ docs/
 signer-rs/target/
 # Generated golden vectors — their byte stability must not depend on the Prettier version.
 signer-rs/crates/*/tests/fixtures/
+# A byte-for-byte copy of the UNLOCK_HTML template literal in signer/index.ts, embedded
+# with include_str! and served as-is. Reformatting it would change what goes on the wire.
+signer-rs/crates/signer-daemon/src/unlock.html

@@ -6,6 +6,7 @@
   "scripts": {
     "e2e:m3": "ts-node --project tsconfig.json run-m3.ts",
     "e2e:m5": "ts-node --project tsconfig.json run-m5.ts",
+    "e2e:m6": "ts-node --project tsconfig.json run-m6.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

@@ -27,7 +27,9 @@ export const FIXTURES = path.join(WORKSPACE, 'crates', 'signer-core', 'tests', '
 
 /** Same throwaway seed as `crypto_vectors.json` and `tx_vectors.json`. */
 const SIGNER_SEED = 0x42;
-const PASSWORD = 'test-password-123';
+
+/** The password `prepareWorkspace` encrypts the keyfile with. */
+export const PASSWORD = 'test-password-123';
 
 const SOCKET_WAIT_MS = 30_000;
 
@@ -156,6 +158,8 @@ export function buildDaemon(): void {
 export interface Daemon {
   process: ChildProcessWithoutNullStreams;
   stderr: () => string;
+  /** The exit code once the daemon has exited, `null` while it is running. */
+  exited: () => number | null;
 }
 
 /**
@@ -188,7 +192,22 @@ export interface DaemonOptions {
 }
 
 /**
- * Starts the daemon and waits for its socket to appear.
+ * Starts the daemon, unlocks it over stdin, and waits for its socket.
+ *
+ * The two halves are separately exported because the unlock milestone needs
+ * them apart: `run-m6.ts` starts a daemon that is still locked, drives its HTTP
+ * page, and only then has a socket to wait for.
+ */
+export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
+  const daemon = spawnDaemon(options);
+  daemon.process.stdin.write(`${PASSWORD}\n`);
+  daemon.process.stdin.end();
+  await waitForSocket(daemon, options.workspace.socketPath);
+  return daemon;
+}
+
+/**
+ * Spawns the daemon and starts echoing its output. It is still locked.
  *
  * The built binary is spawned directly rather than through `cargo run`: killing
  * `cargo run` leaves the child it spawned alive, and an orphaned signer holding
@@ -196,9 +215,10 @@ export interface DaemonOptions {
  *
  * The environment is built from nothing but these variables, and the daemon is
  * started inside the temp workspace, so no `.env` file on the machine running
- * this can reach it.
+ * this can reach it. Its stdin is a pipe rather than a terminal, which is what
+ * puts a daemon with `SIGNER_UNLOCK_PORT` set into browser-only unlock mode.
  */
-export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
+export function spawnDaemon(options: DaemonOptions): Daemon {
   const { workspace, rpcUrl, env = {} } = options;
 
   const child = spawn(DAEMON_BIN, {
@@ -226,24 +246,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     exited = code ?? -1;
   });
 
-  child.stdin.write(`${PASSWORD}\n`);
-  child.stdin.end();
+  return { process: child, stderr: () => stderr, exited: () => exited };
+}
 
-  const deadline = Date.now() + SOCKET_WAIT_MS;
-  while (!fs.existsSync(workspace.socketPath)) {
+/** Waits for the signing socket to appear, failing fast if the daemon dies. */
+export async function waitForSocket(
+  daemon: Daemon,
+  socketPath: string,
+  waitMs = SOCKET_WAIT_MS,
+): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  while (!fs.existsSync(socketPath)) {
+    const exited = daemon.exited();
     if (exited !== null) {
-      throw new Error(`daemon exited with code ${exited} before binding\n${stderr}`);
+      throw new Error(`daemon exited with code ${exited} before binding\n${daemon.stderr()}`);
     }
     if (Date.now() > deadline) {
-      child.kill('SIGKILL');
-      throw new Error(
-        `daemon did not bind ${workspace.socketPath} within ${SOCKET_WAIT_MS}ms\n${stderr}`,
-      );
+      daemon.process.kill('SIGKILL');
+      throw new Error(`daemon did not bind ${socketPath} within ${waitMs}ms\n${daemon.stderr()}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-
-  return { process: child, stderr: () => stderr };
 }
 
 export function stopDaemon(daemon: Daemon): Promise<number | null> {

@@ -3,18 +3,18 @@
 //! Reads its configuration, unlocks the encrypted keyfile, and serves signing
 //! requests on a Unix socket — the runnable half of `signer/index.ts`.
 //!
-//! **M5 status: the policy engine is wired.** Every request is resolved,
-//! checked against the program allowlist and the SPL rules, and simulated before
-//! a signature is produced.
-//!
-//! One thing is still missing: the localhost unlock page (M6 — until then the
-//! password is read from stdin whatever `SIGNER_UNLOCK_PORT` says).
+//! **M6 status: the policy engine is wired and the daemon unlocks the way the
+//! TypeScript signer does.** Every request is resolved, checked against the
+//! program allowlist and the SPL rules, and simulated before a signature is
+//! produced; the password arrives on stdin, through the localhost unlock page
+//! (`SIGNER_UNLOCK_PORT`), or through whichever of the two answers first.
 //!
 //! All logging goes to stderr. `signer/index.ts` splits it across stdout and
 //! stderr the way `console.log`/`console.error` do, but this process emits no
 //! data on stdout at all, and keeping the log on one stream is what makes the
 //! password prompt — also stderr — appear in the right place relative to it.
 
+use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::{fs, path::PathBuf, thread};
@@ -42,6 +42,7 @@ macro_rules! error {
 mod key_load;
 mod rpc_client;
 mod server;
+mod unlock;
 
 /// `.env` files to load, in the order the TypeScript signer loads them
 /// (`signer/config.ts:5-6`): the signer's own file first, project root second.
@@ -63,14 +64,19 @@ fn main() -> ExitCode {
 
     let keyfile = key_load::keyfile_path();
     info!("Keyfile: {}", keyfile.display());
-    if config.web_unlock_enabled() {
-        info!(
-            "Unlock page (port {}) is not implemented yet (M6) — reading the password from stdin",
-            config.unlock_port
-        );
+
+    // Read here rather than inside the unlock routes so the decision is made
+    // once, before any of them can consume stdin. Under systemd stdin is
+    // `/dev/null` or a socket, never a terminal, which is exactly the signal
+    // `signer/index.ts:167` uses to decide there is nobody to prompt.
+    let mode = unlock::UnlockMode::select(config.unlock_port, std::io::stdin().is_terminal());
+    match mode {
+        unlock::UnlockMode::Web(_) => info!("Unlock mode: browser only (no TTY)"),
+        unlock::UnlockMode::Race(_) => info!("Unlock mode: browser + stdin"),
+        unlock::UnlockMode::Stdin => {}
     }
 
-    let keypair = match key_load::unlock(&keyfile) {
+    let keypair = match key_load::unlock(&keyfile, mode) {
         Ok(keypair) => keypair,
         Err(err) => {
             error!("{err}");

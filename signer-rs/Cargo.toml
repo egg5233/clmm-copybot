@@ -29,6 +29,7 @@ solana-address-lookup-table-interface = { version = "2.2", features = ["bincode"
 solana-client = "2.3"
 solana-sdk = "2"
 thiserror = "2"
+tiny_http = "0.12"
 zeroize = "1"
 
 [workspace.lints.rust]

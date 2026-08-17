@@ -4,3 +4,7 @@
 # 以下類型強制 LF — 在 Windows 也用 LF，避免 scp 上 Linux VPS 後 bash 無法執行
 *.sh text eol=lf
 *.service text eol=lf
+
+# Rust signer 的解鎖頁面：與 signer/index.ts 的 UNLOCK_HTML 逐位元組相同，
+# 由 include_str! 內嵌後原樣送出，CRLF checkout 會改變送到瀏覽器的位元組。
+signer-rs/crates/signer-daemon/src/unlock.html text eol=lf
