@@ -43,7 +43,8 @@ export interface BotContext {
   // Runtime state
   opQueue: OperationQueue;
 
-  // Disk-persisted event log & swap history
+  // The live arrays owned by src/state/activity-log.ts, which persists them to
+  // Postgres. Read them; append through pushEvent()/pushSwap().
   eventLog: EventLogEntry[];
   swapHistory: SwapHistoryEntry[];
 

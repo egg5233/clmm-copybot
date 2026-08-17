@@ -38,6 +38,16 @@ import {
   lastSwapError,
 } from './jupiter-swap';
 import { PositionMap } from '../state/position-map';
+import {
+  addBotReceived,
+  addPending,
+  allPendingSwaps,
+  clearPendingSwaps,
+  countPendingSwaps,
+  deletePendingSwap,
+  getPendingSwap,
+  setPendingSwap,
+} from '../state/pending-swaps-store';
 import { OperationQueue } from './queue';
 import {
   notifySolInsufficient,
@@ -279,11 +289,10 @@ export class ByrealPositionExecutor {
     if (refererCount > 0) {
       logger.info(MODULE, `Found ${refererCount} opened referers on disk`);
     }
-    // Log pending state on startup (file is source of truth, no memory load needed)
-    const pendingData = this.readPendingFile();
-    const pendingCount = Object.keys(pendingData).length;
+    // Log pending state on startup (the shared store has already loaded it)
+    const pendingCount = countPendingSwaps();
     if (pendingCount > 0) {
-      logger.info(MODULE, `Found ${pendingCount} pending swaps on disk`);
+      logger.info(MODULE, `Found ${pendingCount} pending swaps`);
     }
     // Fetch initial SOL balance
     this.getSolBalance()
@@ -506,7 +515,7 @@ export class ByrealPositionExecutor {
 
   /** Read pending swaps (public for dashboard). */
   getPendingSwaps(): Record<string, any> {
-    return this.readPendingFile();
+    return allPendingSwaps();
   }
 
   /** Read opened referers (public for dashboard). */
@@ -732,7 +741,7 @@ export class ByrealPositionExecutor {
 
   /** Clear all pending swaps (dashboard action). */
   clearAllPendingSwaps(): void {
-    this.writePendingFile({});
+    clearPendingSwaps();
     logger.info(MODULE, 'All pending swaps cleared via dashboard');
   }
 
@@ -838,8 +847,7 @@ export class ByrealPositionExecutor {
 
   /** Force-swap entire pending balance for a mint to USDC (dashboard action). */
   async forceSwapPending(inputMint: string): Promise<string | null> {
-    const data = this.readPendingFile();
-    const entry = data[inputMint];
+    const entry = getPendingSwap(inputMint);
     if (!entry || !entry.pending || new BN(entry.pending).lte(new BN(1000))) {
       logger.warn(MODULE, `forceSwap: no pending for ${inputMint.slice(0, 8)} (or dust)`);
       return null;
@@ -2101,9 +2109,8 @@ export class ByrealPositionExecutor {
    * Key = mint address, Value = OUR accumulated received amount.
    * Persisted to disk so they survive restarts.
    */
-  // Pending swap state: JSON file is the sole source of truth (no in-memory cache).
-
-  private static PENDING_FILE = './data/pending-swaps.json';
+  // Pending swap state lives in src/state/pending-swaps-store.ts, shared with the
+  // other DEX executors and written through to Postgres.
 
   /**
    * Copy a ClosePosition from target.
@@ -2238,15 +2245,10 @@ export class ByrealPositionExecutor {
       return;
     if (amount.lte(new BN(0))) return;
 
-    const data = this.readPendingFile();
-    const entry = data[mintStr] || { pending: '0', botReceived: '0', createdAt: Date.now() };
-    const existing = new BN(entry.pending);
-    const total = existing.add(amount);
-    data[mintStr] = { ...entry, pending: total.toString() };
-    this.writePendingFile(data);
+    const total = addPending(mintStr, amount);
     logger.info(
       MODULE,
-      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`,
+      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total})`,
     );
   }
 
@@ -2255,7 +2257,6 @@ export class ByrealPositionExecutor {
    * Called from handleEvent with data parsed from the close TX balance changes.
    */
   recordBotCloseReceived(receivedTokens: { mint: string; amount: string }[]): void {
-    const data = this.readPendingFile();
     for (const { mint, amount } of receivedTokens) {
       const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
       const USDT_MINT = 'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5';
@@ -2271,16 +2272,12 @@ export class ByrealPositionExecutor {
       const bn = new BN(amount);
       if (bn.lte(new BN(0))) continue;
 
-      const entry = data[mint] || { pending: '0', botReceived: '0', createdAt: Date.now() };
-      const existing = new BN(entry.botReceived || '0');
-      const total = existing.add(bn);
-      data[mint] = { ...entry, botReceived: total.toString() };
+      const total = addBotReceived(mint, bn);
       logger.info(
         MODULE,
-        `Bot close received: ${mint.slice(0, 8)}... amount=${bn.toString()} (total=${total.toString()})`,
+        `Bot close received: ${mint.slice(0, 8)}... amount=${bn.toString()} (total=${total})`,
       );
     }
-    this.writePendingFile(data);
   }
 
   /**
@@ -2294,10 +2291,9 @@ export class ByrealPositionExecutor {
    * This ensures we swap the same PROPORTION as the bot, regardless of absolute amounts.
    */
   async executePendingSwap(inputMint: string, botSwapAmount: string): Promise<string | null> {
-    const data = this.readPendingFile();
-    const entry = data[inputMint];
+    const entry = getPendingSwap(inputMint);
     const pendingAmount = entry ? new BN(entry.pending) : null;
-    if (!pendingAmount || pendingAmount.lte(new BN(1000))) {
+    if (!entry || !pendingAmount || pendingAmount.lte(new BN(1000))) {
       logger.debug(MODULE, `No pending swap for ${inputMint.slice(0, 8)}... (or dust)`);
       return null;
     }
@@ -2375,54 +2371,28 @@ export class ByrealPositionExecutor {
    * Only fully deletes when remaining is dust (≤ 1000 raw units).
    */
   private subtractPending(inputMint: string, ourSwapped: BN, botSwapped: BN): void {
-    const data = this.readPendingFile();
-    const entry = data[inputMint];
+    const entry = getPendingSwap(inputMint);
     if (!entry) return;
 
     const remaining = new BN(entry.pending).sub(ourSwapped);
     if (remaining.lte(new BN(1000))) {
-      delete data[inputMint];
-    } else {
-      entry.pending = remaining.toString();
-      const botReceived = entry.botReceived ? new BN(entry.botReceived) : new BN(0);
-      const botRemaining = botReceived.sub(botSwapped);
-      entry.botReceived = botRemaining.lte(new BN(0)) ? '0' : botRemaining.toString();
-      logger.info(
-        MODULE,
-        `Pending remaining: ${inputMint.slice(0, 8)}... = ${remaining.toString()}`,
-      );
+      deletePendingSwap(inputMint);
+      return;
     }
-    this.writePendingFile(data);
+
+    const botReceived = entry.botReceived ? new BN(entry.botReceived) : new BN(0);
+    const botRemaining = botReceived.sub(botSwapped);
+    setPendingSwap(inputMint, {
+      ...entry,
+      pending: remaining.toString(),
+      botReceived: botRemaining.lte(new BN(0)) ? '0' : botRemaining.toString(),
+    });
+    logger.info(MODULE, `Pending remaining: ${inputMint.slice(0, 8)}... = ${remaining.toString()}`);
   }
 
   /** Fully clear all pending data for a mint. */
   private clearPending(inputMint: string): void {
-    const data = this.readPendingFile();
-    delete data[inputMint];
-    this.writePendingFile(data);
-  }
-
-  /** Read all pending state directly from JSON file (file is source of truth). */
-  private readPendingFile(): Record<string, any> {
-    try {
-      const filePath = ByrealPositionExecutor.PENDING_FILE;
-      if (!fs.existsSync(filePath)) return {};
-      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-
-  /** Write pending state to JSON file. */
-  private writePendingFile(data: Record<string, any>): void {
-    try {
-      const filePath = ByrealPositionExecutor.PENDING_FILE;
-      const dir = path.dirname(filePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      logger.error(MODULE, `Could not save pending state: ${err.message}`);
-    }
+    deletePendingSwap(inputMint);
   }
 
   // --- Token PnL file (persisted across restarts) ---
@@ -2514,16 +2484,13 @@ export class ByrealPositionExecutor {
 
   /** Log pending swap status and clean up zero-amount entries. */
   async logPendingStatus(): Promise<void> {
-    const data = this.readPendingFile();
-    let cleaned = false;
-    for (const [mint, entry] of Object.entries(data)) {
-      const e = entry as any;
-      const pending = new BN(e.pending || '0');
+    for (const [mint, entry] of Object.entries(allPendingSwaps())) {
+      const pending = new BN(entry.pending || '0');
       if (pending.isZero()) {
-        delete data[mint];
-        cleaned = true;
+        deletePendingSwap(mint);
         continue;
       }
+      let amount = entry.pending;
       // Sync pending amount with actual wallet balance
       try {
         const balance = await this.getTokenBalance(getUserAddress(), new PublicKey(mint));
@@ -2532,25 +2499,20 @@ export class ByrealPositionExecutor {
             MODULE,
             `Pending ${this.getTokenSymbol(mint)} balance is dust, clearing (externally swapped?)`,
           );
-          delete data[mint];
-          cleaned = true;
+          deletePendingSwap(mint);
           continue;
         }
         // Update pending to actual balance
         if (!balance.eq(pending)) {
-          e.pending = balance.toString();
-          cleaned = true;
+          amount = balance.toString();
+          setPendingSwap(mint, { ...entry, pending: amount });
         }
       } catch {
         /* ignore RPC errors */
       }
-      const ageMin = e.createdAt ? Math.floor((Date.now() - e.createdAt) / 60000) : 0;
-      logger.debug(
-        MODULE,
-        `Pending: ${this.getTokenSymbol(mint)} amount=${e.pending} (${ageMin}min)`,
-      );
+      const ageMin = entry.createdAt ? Math.floor((Date.now() - entry.createdAt) / 60000) : 0;
+      logger.debug(MODULE, `Pending: ${this.getTokenSymbol(mint)} amount=${amount} (${ageMin}min)`);
     }
-    if (cleaned) this.writePendingFile(data);
   }
 
   /**

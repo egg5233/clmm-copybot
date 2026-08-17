@@ -1,8 +1,4 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { normalizeByrealMaxOpenPositions } from '../src/config';
 import { applyByrealMaxOpenPositionsConfig } from '../src/dashboard/server';
@@ -23,15 +19,10 @@ describe('normalizeByrealMaxOpenPositions', () => {
 });
 
 describe('Byreal open position counting', () => {
-  let dir: string;
-
-  afterEach(() => {
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
-  });
-
+  // Counting is pure in-memory work: a PositionMap that was never init()ed does
+  // not reach for Postgres, so these cases need no database.
   function mapWithOnePositionPerDex(): PositionMap {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'byreal-position-cap-'));
-    const map = new PositionMap(path.join(dir, 'position-map.json'));
+    const map = new PositionMap();
     map.set('target-byreal-legacy', 'our-byreal-legacy', 'A/B', 'wallet-a');
     map.set(
       'target-byreal-tagged',

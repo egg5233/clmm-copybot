@@ -42,6 +42,7 @@ import {
   pollApprovals,
   setPumpPollerWallet,
 } from '../state/pump-pending';
+import { pushSwap } from '../state/activity-log';
 import { notifyPumpApproval } from '../discord/notify';
 import {
   getDacHistory,
@@ -2280,18 +2281,15 @@ async function handleAPI(
         if (result) {
           ctx.executor.invalidateAssetCaches();
           logger.info(MODULE, `Force swap done: ${inputMint.slice(0, 8)}... TX: ${result.sig}`);
-          ctx.swapHistory.push({
+          // Same push the bot's own Jupiter path uses, so this route no longer
+          // keeps a second copy of the history that could overwrite the first.
+          pushSwap({
             ts: Date.now(),
             inputMint,
             txSig: result.sig,
             inputAmountRaw: result.amountRaw,
             outputAmountRaw: result.outputRaw,
           });
-          if (ctx.swapHistory.length > 40) ctx.swapHistory.shift();
-          try {
-            const swapFile = path.resolve('./data/swap-history.json');
-            fs.writeFileSync(swapFile, JSON.stringify(ctx.swapHistory));
-          } catch {}
           return json({ ok: true, txSig: result.sig, message: '交換成功' });
         }
         return json({ ok: false, message: '交換未執行（餘額不足或被跳過）' });

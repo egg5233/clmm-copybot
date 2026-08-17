@@ -16,9 +16,16 @@
  * same table. That is why useTestDatabase() takes an explicit list rather than
  * wiping everything. tests/repo/db.test.ts owns no table from the migration — it
  * queries the catalog read-only and makes its own scratch table.
+ *
+ * A suite that cannot honour that rule — the store tests outside this directory
+ * cover the same tables the repository suites own — takes a database of its own
+ * through useOwnTestDatabase().
  */
 
-import { afterAll, beforeEach } from 'vitest';
+import { runner } from 'node-pg-migrate';
+import path from 'path';
+import { Client } from 'pg';
+import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { closePool, getPool } from '../../src/state/db';
 
 /** Every table the initial migration creates. */
@@ -64,5 +71,76 @@ export function useTestDatabase(tables: readonly string[]): void {
 
   afterAll(async () => {
     await closePool();
+  });
+}
+
+/** A DATABASE_URL pointing at a different database on the same server. */
+function databaseUrlFor(baseUrl: string, name: string): string {
+  const url = new URL(baseUrl);
+  url.pathname = `/${name}`;
+  return url.toString();
+}
+
+async function onAdminConnection(
+  url: string,
+  fn: (client: Client) => Promise<void>,
+): Promise<void> {
+  const client = new Client({ connectionString: url });
+  await client.connect();
+  try {
+    await fn(client);
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Give one suite a database of its own, created and migrated for the run.
+ *
+ * The store suites — tests/position-map.test.ts and the ones that will follow —
+ * exercise the same tables the repository suites already own, and there is no
+ * way to divide `positions` between two files that vitest may run at the same
+ * moment. Its own database is less machinery than coordinating that ownership,
+ * and it means a store suite can truncate freely.
+ *
+ * DATABASE_URL is redirected for this worker only: vitest forks a process per
+ * test file, so the change reaches the store under test and nothing else.
+ */
+export function useOwnTestDatabase(name: string, tables: readonly string[] = ALL_TABLES): void {
+  if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+    throw new Error(`Not a usable database name: ${name}`);
+  }
+  const serverUrl = process.env.DATABASE_URL;
+
+  beforeAll(async () => {
+    if (!serverUrl) return;
+    await onAdminConnection(serverUrl, async (client) => {
+      await client.query(`DROP DATABASE IF EXISTS "${name}"`);
+      await client.query(`CREATE DATABASE "${name}"`);
+    });
+
+    const url = databaseUrlFor(serverUrl, name);
+    process.env.DATABASE_URL = url;
+    await runner({
+      databaseUrl: url,
+      dir: path.resolve(__dirname, '../../migrations'),
+      direction: 'up',
+      migrationsTable: 'pgmigrations',
+      log: () => {},
+    });
+  });
+
+  beforeEach(async () => {
+    if (serverUrl) await truncate(tables);
+  });
+
+  afterAll(async () => {
+    if (!serverUrl) return;
+    // The pool has to let go before the server will drop the database.
+    await closePool();
+    process.env.DATABASE_URL = serverUrl;
+    await onAdminConnection(serverUrl, async (client) => {
+      await client.query(`DROP DATABASE IF EXISTS "${name}"`);
+    });
   });
 }

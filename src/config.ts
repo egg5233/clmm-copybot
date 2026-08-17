@@ -36,6 +36,25 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * The Postgres URL, demanded at the point the state stores are initialised
+ * rather than at import time: the unit tests import this module without a
+ * database and must keep doing so.
+ */
+export function requireDatabaseUrl(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL is not set. The bot keeps its positions, event log, swap history and ' +
+        'pending swaps in Postgres, so it cannot start without one. Start the bundled ' +
+        'database with `docker compose up -d postgres` (see docker-compose.yml), apply the ' +
+        'schema with `npm run migrate`, then copy the DATABASE_URL line from .env.example ' +
+        'into your .env — or point it at a Postgres server you already run.',
+    );
+  }
+  return url;
+}
+
 // Parse TARGET_WALLETS with optional per-wallet ratio suffix: "WalletA:0.5,WalletB,WalletC:1.5"
 // Base58 addresses never contain ':', so ':' is a safe delimiter.
 function parseTargetWallets(raw: string): { wallets: PublicKey[]; ratios: Map<string, number> } {
@@ -264,6 +283,12 @@ export const config = {
       .filter((s) => s.length > 0),
   ),
 
+  // DATABASE_URL is deliberately absent here: src/state/db.ts reads it at
+  // connect time and requireDatabaseUrl() validates it at store init, so a
+  // frozen copy taken at import could only ever disagree with them.
+
   // Paths
+  // Legacy JSON location. The bot no longer reads or writes it; it is where the
+  // one-off importer looks for state to carry into Postgres.
   positionMapFile: process.env.POSITION_MAP_FILE || './data/position-map.json',
 };

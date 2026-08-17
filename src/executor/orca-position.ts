@@ -23,6 +23,7 @@ import { getUserAddress, getWalletAdapter } from '../utils/wallet';
 import { scaleAmount, getAmountRatio } from '../utils/ratio';
 import { jupiterFetch } from '../utils/jupiter-api';
 import { PositionMap } from '../state/position-map';
+import { addPending } from '../state/pending-swaps-store';
 import {
   notifyOpenFailed,
   notifyCloseFailed,
@@ -39,14 +40,12 @@ import {
 import { swapForToken, getActualSwapOutput, lastSwapError, jupSwapExactIn } from './jupiter-swap';
 import { checkTokenLiquidity } from '../monitor/pool-tvl';
 import * as fs from 'fs';
-import * as path from 'path';
 
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDT_MINT = 'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5';
 const USDT_T22 = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 
 const MODULE = 'OrcaPos';
-const PENDING_FILE = './data/pending-swaps.json';
 
 // Orca pool TVL cache: poolAddress → { tvlUsdc, fetchedAt }
 const orcaTvlCache = new Map<string, { tvlUsdc: number; fetchedAt: number }>();
@@ -314,7 +313,7 @@ export class OrcaPositionExecutor {
     }
   }
 
-  /** Add to shared pending-swaps.json (same file as Byreal executor). */
+  /** Add to the pending-swap store shared with the other DEX executors. */
   private addPendingSwap(mint: PublicKey, amount: BN): void {
     const mintStr = mint.toBase58();
     if (
@@ -326,15 +325,10 @@ export class OrcaPositionExecutor {
       return;
     if (amount.lte(new BN(0))) return;
 
-    const data = this.readPendingFile();
-    const entry = data[mintStr] || { pending: '0', botReceived: '0', createdAt: Date.now() };
-    const existing = new BN(entry.pending);
-    const total = existing.add(amount);
-    data[mintStr] = { ...entry, pending: total.toString() };
-    this.writePendingFile(data);
+    const total = addPending(mintStr, amount);
     logger.info(
       MODULE,
-      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`,
+      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total})`,
     );
   }
 
@@ -393,25 +387,6 @@ export class OrcaPositionExecutor {
       return new BN(withBuffer.toString());
     } catch {
       return null;
-    }
-  }
-
-  private readPendingFile(): Record<string, any> {
-    try {
-      if (!fs.existsSync(PENDING_FILE)) return {};
-      return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-
-  private writePendingFile(data: Record<string, any>): void {
-    try {
-      const dir = path.dirname(PENDING_FILE);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(PENDING_FILE, JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      logger.warn(MODULE, `writePendingFile failed: ${err.message}`);
     }
   }
 

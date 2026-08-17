@@ -1,8 +1,8 @@
 /**
  * `pending_swaps` repository — replaces data/pending-swaps.json.
  *
- * The file was read-modify-written by five executor modules (byreal, orca,
- * meteora, pancakeswap, dammv2) with no locking: each one parsed the entire
+ * The file was read-modify-written by four executor modules (byreal, orca,
+ * meteora, dammv2) with no locking: each one parsed the entire
  * object, mutated its own mint, and wrote the whole thing back. Two closes
  * landing together meant the slower writer's parse was already stale, and its
  * write silently erased the other mint.

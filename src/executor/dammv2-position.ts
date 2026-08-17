@@ -18,6 +18,7 @@ import { logger } from '../utils/logger';
 import { getUserAddress, signLegacy, signLegacyWithExtra } from '../utils/wallet';
 import { scaleAmount, getAmountRatio } from '../utils/ratio';
 import { PositionMap } from '../state/position-map';
+import { addPending } from '../state/pending-swaps-store';
 import {
   notifyOpenFailed,
   notifyCloseFailed,
@@ -40,14 +41,12 @@ import {
 import { OperationQueue } from './queue';
 import { checkTokenLiquidity } from '../monitor/pool-tvl';
 import * as fs from 'fs';
-import * as path from 'path';
 
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDT_MINT = 'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5';
 const USDT_T22 = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 
 const MODULE = 'DammV2Pos';
-const PENDING_FILE = './data/pending-swaps.json';
 const DAMMV2_PROGRAM_ID = 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG';
 
 export class DammV2PositionExecutor {
@@ -255,35 +254,11 @@ export class DammV2PositionExecutor {
       return;
     if (amount.lte(new BN(0))) return;
 
-    const data = this.readPendingFile();
-    const entry = data[mintStr] || { pending: '0', botReceived: '0', createdAt: Date.now() };
-    const existing = new BN(entry.pending);
-    const total = existing.add(amount);
-    data[mintStr] = { ...entry, pending: total.toString() };
-    this.writePendingFile(data);
+    const total = addPending(mintStr, amount);
     logger.info(
       MODULE,
-      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`,
+      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total})`,
     );
-  }
-
-  private readPendingFile(): Record<string, any> {
-    try {
-      if (!fs.existsSync(PENDING_FILE)) return {};
-      return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-
-  private writePendingFile(data: Record<string, any>): void {
-    try {
-      const dir = path.dirname(PENDING_FILE);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(PENDING_FILE, JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      logger.warn(MODULE, `writePendingFile failed: ${err.message}`);
-    }
   }
 
   /**

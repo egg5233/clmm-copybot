@@ -33,10 +33,11 @@ per snapshot once the unbounded daily tier had built up.
 An append is now one `INSERT`, and the cap is a `DELETE` in the same transaction
 rather than an array splice on the way out.
 
-### Five writers, one file, no locking
+### Four writers, one file, no locking
 
-`data/pending-swaps.json` is written by five executor modules — `byreal`, `orca`,
-`meteora`, `pancakeswap`, `dammv2` — and each of them does this:
+`data/pending-swaps.json` is written by four executor modules — `byreal`, `orca`,
+`meteora`, `dammv2` — and each of them does this (`pancakeswap` names the same
+file but hands its close proceeds to the Byreal executor instead):
 
 ```ts
 const data = this.readPendingFile();          // parse the whole file
@@ -239,9 +240,9 @@ Four tables keep an untyped `payload JSONB` column: `pending_swaps`, `token_pnl`
 `Record<string, any>` on disk, with the shape spread across several writers — and
 promoting the fields to columns needs an audit this change is not the place for.
 
-- `pending_swaps.payload` — five executor modules write it, agreeing on
+- `pending_swaps.payload` — four executor modules write it, agreeing on
   `{pending, botReceived, createdAt}` but each adding fields. Closing the shape
-  means checking all five.
+  means checking all four.
 - `token_pnl.payload` — the executor writes four fields; the dashboard merges
   display fields into the same object on read, so the shape is not closed.
 - `claim_history.payload` / `dac_history.payload` — wide display-only records.

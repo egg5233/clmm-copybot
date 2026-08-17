@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import BN from 'bn.js';
 import { Connection, PublicKey } from '@solana/web3.js';
-import { config } from './config';
+import { config, requireDatabaseUrl } from './config';
 import { logger } from './utils/logger';
 import { getUserAddress } from './utils/wallet';
 import { WebSocketMonitor } from './monitor/websocket';
@@ -13,6 +13,16 @@ import { MeteoraPositionExecutor } from './executor/meteora-position';
 import { PcsPositionExecutor } from './executor/pancakeswap-position';
 import { DammV2PositionExecutor } from './executor/dammv2-position';
 import { PositionMap } from './state/position-map';
+import {
+  backfillEventPools,
+  flushActivityLog,
+  getEventLog,
+  getSwapHistory,
+  initActivityLog,
+  pushEvent,
+  pushSwap,
+} from './state/activity-log';
+import { flushPendingSwaps, initPendingSwaps } from './state/pending-swaps-store';
 import { startDashboard, refreshSolPrice } from './dashboard/server';
 import {
   startAssetTrendCollector,
@@ -38,10 +48,6 @@ import { setPumpPollerWallet } from './state/pump-pending';
 
 const MODULE = 'Main';
 const LOCK_FILE = path.resolve('./data/bot.lock');
-const EVENT_LOG_FILE = path.resolve('./data/event-log.json');
-const SWAP_HISTORY_FILE = path.resolve('./data/swap-history.json');
-const MAX_EVENT_LOG = 1000;
-const MAX_SWAP_HISTORY = 40;
 
 /** Prevent multiple instances — duplicate WebSocket = duplicate trades */
 function acquireLock(): void {
@@ -72,58 +78,17 @@ function releaseLock(): void {
   }
 }
 
-// --- Disk-persisted event log (with poolMap for permanent nft→pool lookup) ---
-// Format: { poolMap: { targetNft: "mintA/mintB" }, events: [...] }
-// Backward compatible: old array-only format auto-migrated on load
-let eventPoolMap: Record<string, string> = {};
-
-function loadEventLog(): EventLogEntry[] {
-  try {
-    if (fs.existsSync(EVENT_LOG_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(EVENT_LOG_FILE, 'utf-8'));
-      if (Array.isArray(raw)) return raw; // old format
-      if (raw.events && Array.isArray(raw.events)) {
-        eventPoolMap = raw.poolMap || {};
-        return raw.events;
-      }
-    }
-  } catch {
-    /* corrupted, start fresh */
-  }
-  return [];
-}
-
-function saveEventLog(log: EventLogEntry[]): void {
-  try {
-    const dir = path.dirname(EVENT_LOG_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(EVENT_LOG_FILE, JSON.stringify({ poolMap: eventPoolMap, events: log }));
-  } catch (err: any) {
-    logger.warn(MODULE, `Could not save event log: ${err.message}`);
-  }
-}
-
-// --- Disk-persisted swap history ---
-function loadSwapHistory(): SwapHistoryEntry[] {
-  try {
-    if (fs.existsSync(SWAP_HISTORY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(SWAP_HISTORY_FILE, 'utf-8'));
-      if (Array.isArray(data)) return data;
-    }
-  } catch {
-    /* corrupted, start fresh */
-  }
-  return [];
-}
-
-function saveSwapHistory(history: SwapHistoryEntry[]): void {
-  try {
-    const dir = path.dirname(SWAP_HISTORY_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(SWAP_HISTORY_FILE, JSON.stringify(history));
-  } catch (err: any) {
-    logger.warn(MODULE, `Could not save swap history: ${err.message}`);
-  }
+/**
+ * Bring the Postgres-backed stores up before anything can mutate them.
+ *
+ * Each store loads what survived the restart into memory and starts persisting
+ * mutations from that point; call sites keep reading them synchronously. This
+ * has to finish before the WebSocket monitor starts, or an event could be
+ * handled against an empty position map.
+ */
+async function initState(positionMap: PositionMap): Promise<void> {
+  requireDatabaseUrl();
+  await Promise.all([positionMap.init(), initActivityLog(), initPendingSwaps()]);
 }
 
 async function main() {
@@ -194,6 +159,7 @@ async function main() {
     ? new Connection(config.readRpcUrl, { commitment: 'confirmed' })
     : connection;
   const positionMap = new PositionMap();
+  await initState(positionMap);
 
   const byrealExecutor = new ByrealPositionExecutor(connection, positionMap);
   const orcaExecutor = config.orcaEnabled
@@ -252,35 +218,25 @@ async function main() {
   logger.info(MODULE, `Loaded ${positionMap.size()} existing position mappings`);
 
   const processedSignatures = new Set<string>(); // Dedup WebSocket duplicates
-  const eventLog: EventLogEntry[] = loadEventLog();
-  const swapHistory: SwapHistoryEntry[] = loadSwapHistory();
+  const eventLog: EventLogEntry[] = getEventLog();
+  const swapHistory: SwapHistoryEntry[] = getSwapHistory();
   logger.info(
     MODULE,
-    `Loaded ${eventLog.length} events and ${swapHistory.length} swap records from disk`,
+    `Loaded ${eventLog.length} events and ${swapHistory.length} swap records from Postgres`,
   );
 
-  // Backfill pool info: seed poolMap from position map + existing events, then fill gaps
+  // Backfill pool info: seed the nft→pool lookup from the position map, then label
+  // events that were stored before their pool was known.
+  const positionPools: Record<string, string> = {};
   for (const [targetNft, entry] of Object.entries(positionMap.toJSON())) {
-    if (entry.pool && !eventPoolMap[targetNft]) eventPoolMap[targetNft] = entry.pool;
+    if (entry.pool) positionPools[targetNft] = entry.pool;
   }
-  for (const evt of eventLog) {
-    if (evt.pool && evt.targetNft && !eventPoolMap[evt.targetNft])
-      eventPoolMap[evt.targetNft] = evt.pool;
-  }
-  let backfilled = 0;
-  for (const evt of eventLog) {
-    if (!evt.pool && evt.targetNft && eventPoolMap[evt.targetNft]) {
-      evt.pool = eventPoolMap[evt.targetNft];
-      backfilled++;
-    }
-  }
-  if (backfilled > 0 || Object.keys(eventPoolMap).length > 0) {
-    saveEventLog(eventLog);
-    if (backfilled > 0)
-      logger.info(
-        MODULE,
-        `Backfilled pool info for ${backfilled} events (poolMap: ${Object.keys(eventPoolMap).length} entries)`,
-      );
+  const { backfilled, poolCount } = backfillEventPools(positionPools);
+  if (backfilled > 0) {
+    logger.info(
+      MODULE,
+      `Backfilled pool info for ${backfilled} events (poolMap: ${poolCount} entries)`,
+    );
   }
 
   const opQueue = new OperationQueue();
@@ -336,8 +292,6 @@ async function main() {
             signature,
             botLabel,
             targetWallet,
-            eventLog,
-            swapHistory,
             positionMap,
           );
         }
@@ -560,6 +514,8 @@ async function main() {
     clearInterval(maintenanceTimer);
     clearInterval(reconcileTimer);
     await monitor.stop();
+    // Let the queued state writes reach Postgres before the process goes away.
+    await Promise.all([positionMap.flush(), flushActivityLog(), flushPendingSwaps()]);
     await flushAllPending();
     releaseLock();
     process.exit(0);
@@ -586,27 +542,6 @@ async function main() {
   byrealExecutor.backfillPoolInfo().catch((err) => {
     logger.warn(MODULE, `Pool backfill error: ${err.message}`);
   });
-}
-
-function pushEvent(eventLog: EventLogEntry[], entry: EventLogEntry, dex?: string): void {
-  if (dex && !entry.dex) entry.dex = dex;
-  if (entry.pool && entry.targetNft) eventPoolMap[entry.targetNft] = entry.pool;
-  eventLog.push(entry);
-  while (eventLog.length > MAX_EVENT_LOG) {
-    const removed = eventLog.shift();
-    // Clean poolMap if no remaining event references this targetNft
-    if (removed?.targetNft && eventPoolMap[removed.targetNft]) {
-      const stillUsed = eventLog.some((e) => e.targetNft === removed.targetNft);
-      if (!stillUsed) delete eventPoolMap[removed.targetNft];
-    }
-  }
-  saveEventLog(eventLog);
-}
-
-function pushSwap(swapHistory: SwapHistoryEntry[], entry: SwapHistoryEntry): void {
-  swapHistory.push(entry);
-  if (swapHistory.length > MAX_SWAP_HISTORY) swapHistory.shift();
-  saveSwapHistory(swapHistory);
 }
 
 /** Fetch PnL for a closed position from Byreal API (for token cooldown tracking) */
@@ -659,8 +594,6 @@ async function handleEvent(
   txSig: string,
   botLabel: string,
   targetWallet: PublicKey,
-  eventLog: EventLogEntry[],
-  swapHistory: SwapHistoryEntry[],
   positionMap: PositionMap,
 ) {
   const isCloseOnly = config.closeOnlyWallets.has(targetWallet.toBase58());
@@ -681,7 +614,7 @@ async function handleEvent(
               : 'byreal';
 
   // Local pushEvent wrapper that auto-tags dex
-  const push = (entry: EventLogEntry) => pushEvent(eventLog, entry, eventDex);
+  const push = (entry: EventLogEntry) => pushEvent(entry, eventDex);
 
   switch (event.type) {
     case 'JUPITER_SWAP': {
@@ -725,7 +658,7 @@ async function handleEvent(
             success: true,
             pool: `${event.inputMint}/${USDC_MINT}`,
           });
-          pushSwap(swapHistory, {
+          pushSwap({
             ts: Date.now(),
             inputMint: event.inputMint,
             txSig: result.sig,

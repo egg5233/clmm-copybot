@@ -1,75 +1,37 @@
-import fs from 'fs';
-import path from 'path';
-import { config } from '../config';
 import { logger } from '../utils/logger';
+import { positions } from './repo';
+import type { PositionEntry } from './repo/positions';
+import { WriteChain } from './write-chain';
 
 const MODULE = 'PositionMap';
 
-interface PositionEntry {
-  ourNft: string;
-  createdAt: number;
-  pool?: string; // e.g. "MNT/USDC"
-  targetWallet?: string; // which target wallet this position came from
-  lockedSol?: number; // SOL rent locked when this position was opened (lamports → SOL)
-  tickLower?: number; // tick range lower bound
-  tickUpper?: number; // tick range upper bound
-  dex?: string; // 'orca' for Orca Whirlpool positions (default: byreal)
-  targetLiquidity?: string; // target's liquidity at open time (BN string), for proportional decrease
-}
-
 /**
- * Maps target's position NFT mint -> our position NFT mint + timestamp.
- * Persisted to JSON file so it survives restarts.
- * Backward compatible: loads old string-only format automatically.
+ * Maps a target's position NFT mint to ours.
+ *
+ * Every read is synchronous and served from memory, which is what the executors
+ * expect — they call this in the middle of building a transaction. Every
+ * mutation updates that memory and queues the matching `positions` write, so
+ * Postgres receives the same sequence of changes without anything waiting on it.
+ *
+ * init() must be awaited before the bot processes any target activity: it loads
+ * the mappings that survived the restart and arms the write-through. An instance
+ * that was never initialised is a plain in-memory map, which is how the unit
+ * tests use it.
  */
 export class PositionMap {
   private map: Map<string, PositionEntry> = new Map();
-  private filePath: string;
+  private readonly writes = new WriteChain(MODULE);
 
-  constructor(filePath: string = config.positionMapFile) {
-    this.filePath = filePath;
-    this.load();
+  /** Load the mappings from Postgres and start persisting mutations. */
+  async init(): Promise<void> {
+    this.map = new Map(Object.entries(await positions.toJSON()));
+    this.writes.enable();
+    logger.info(MODULE, `Loaded ${this.map.size} position mappings`);
   }
 
-  private load(): void {
-    try {
-      const dir = path.dirname(this.filePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      if (fs.existsSync(this.filePath)) {
-        const data = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
-        for (const [key, value] of Object.entries(data)) {
-          if (typeof value === 'string') {
-            // Migrate old format: string → PositionEntry
-            this.map.set(key, { ourNft: value, createdAt: 0 });
-          } else {
-            this.map.set(key, value as PositionEntry);
-          }
-        }
-        logger.info(MODULE, `Loaded ${this.map.size} position mappings`);
-      }
-    } catch (err: any) {
-      logger.warn(MODULE, `Could not load position map: ${err.message}`);
-    }
-  }
-
-  private save(): void {
-    try {
-      const dir = path.dirname(this.filePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      const obj: Record<string, PositionEntry> = {};
-      for (const [key, entry] of this.map) {
-        obj[key] = entry;
-      }
-      fs.writeFileSync(this.filePath, JSON.stringify(obj, null, 2));
-    } catch (err: any) {
-      logger.error(MODULE, `Could not save position map: ${err.message}`);
-    }
+  /** Resolves once every queued write has reached Postgres. For shutdown and tests. */
+  async flush(): Promise<void> {
+    await this.writes.drain();
   }
 
   set(
@@ -90,7 +52,9 @@ export class PositionMap {
       tickUpper,
       dex,
     });
-    this.save();
+    this.writes.push('position mapping', () =>
+      positions.set(targetNft, myNft, pool, targetWallet, tickLower, tickUpper, dex),
+    );
     logger.info(
       MODULE,
       `Mapped: ${targetNft.slice(0, 8)} -> ${myNft.slice(0, 8)}${pool ? ` (${pool})` : ''}${targetWallet ? ` from ${targetWallet.slice(0, 4)}..` : ''}`,
@@ -133,7 +97,7 @@ export class PositionMap {
 
   delete(targetNft: string): void {
     this.map.delete(targetNft);
-    this.save();
+    this.writes.push('position removal', () => positions.delete(targetNft));
     logger.debug(MODULE, `Removed mapping for: ${targetNft.slice(0, 8)}`);
   }
 
@@ -180,7 +144,7 @@ export class PositionMap {
     const entry = this.map.get(targetNft);
     if (entry) {
       entry.dex = dex;
-      this.save();
+      this.writes.push('position dex', () => positions.setDex(targetNft, dex));
     }
   }
 
@@ -258,7 +222,7 @@ export class PositionMap {
     const entry = this.map.get(targetNft);
     if (entry) {
       entry.pool = pool;
-      this.save();
+      this.writes.push('position pool', () => positions.setPool(targetNft, pool));
     }
   }
 
@@ -267,7 +231,7 @@ export class PositionMap {
     const entry = this.map.get(targetNft);
     if (entry) {
       entry.lockedSol = lockedSol;
-      this.save();
+      this.writes.push('position locked SOL', () => positions.setLockedSol(targetNft, lockedSol));
     }
   }
 
@@ -281,7 +245,9 @@ export class PositionMap {
     const entry = this.map.get(targetNft);
     if (entry) {
       entry.targetLiquidity = liquidity;
-      this.save();
+      this.writes.push('position target liquidity', () =>
+        positions.setTargetLiquidity(targetNft, liquidity),
+      );
     }
   }
 
@@ -309,31 +275,8 @@ export class PositionMap {
   }
 
   /** Full data with timestamps (for dashboard). */
-  toJSON(): Record<
-    string,
-    {
-      ourNft: string;
-      createdAt: number;
-      pool?: string;
-      targetWallet?: string;
-      lockedSol?: number;
-      tickLower?: number;
-      tickUpper?: number;
-      dex?: string;
-    }
-  > {
-    const obj: Record<
-      string,
-      {
-        ourNft: string;
-        createdAt: number;
-        pool?: string;
-        targetWallet?: string;
-        lockedSol?: number;
-        tickLower?: number;
-        tickUpper?: number;
-      }
-    > = {};
+  toJSON(): Record<string, PositionEntry> {
+    const obj: Record<string, PositionEntry> = {};
     for (const [key, entry] of this.map) {
       obj[key] = entry;
     }
