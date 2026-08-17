@@ -11,6 +11,7 @@
 pub mod config;
 pub mod crypto;
 pub mod error;
+pub mod protocol;
 pub mod tx;
 
 pub use config::{PolicyConfig, SignerConfig};

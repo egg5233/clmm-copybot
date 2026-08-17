@@ -1761,9 +1761,14 @@ dependencies = [
 name = "signer-daemon"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "bs58",
  "dotenvy",
  "rpassword",
+ "serde_json",
+ "signal-hook",
  "signer-core",
+ "solana-sdk",
 ]
 
 [[package]]

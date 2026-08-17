@@ -29,6 +29,32 @@ pub enum ConfigError {
 /// Request/response protocol errors on the Unix socket (`signer/index.ts`).
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
+    /// A frame's length prefix exceeded [`crate::protocol::MAX_FRAME_LEN`].
+    ///
+    /// The TypeScript signer has no such cap — it trusts the declared length and
+    /// buffers until that many bytes arrive, so a single 4-byte write can pin
+    /// gigabytes. The limit lives in the wire format here instead.
+    #[error("Frame too large: {len} bytes exceeds the {limit}-byte limit")]
+    FrameTooLarge {
+        /// Length declared by the 4-byte big-endian header.
+        len: u32,
+        /// The cap that was exceeded.
+        limit: u32,
+    },
+
+    /// The stream ended part-way through a length prefix or a payload.
+    #[error("Truncated frame: expected {expected} bytes, got {actual} before end of stream")]
+    Truncated {
+        /// Bytes the header promised (or 4, for a partial header).
+        expected: usize,
+        /// Bytes actually read before EOF.
+        actual: usize,
+    },
+
+    /// The socket failed while a frame was being read.
+    #[error("Socket read failed: {0}")]
+    Io(#[from] std::io::Error),
+
     /// The request body was not valid JSON.
     #[error("Invalid request: malformed JSON: {0}")]
     Json(String),
