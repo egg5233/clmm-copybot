@@ -1346,7 +1346,7 @@ export class MeteoraPositionExecutor {
   }
 
   async isMeteoraPosition(positionAddress: string): Promise<boolean> {
-    for (const [tgtNft, ourNft] of this.positionMap.entries()) {
+    for (const [tgtNft, _ourNft] of this.positionMap.entries()) {
       if (tgtNft === positionAddress) {
         if (this.positionMap.getDex(tgtNft) === 'meteora') return true;
       }
@@ -1468,7 +1468,7 @@ export class MeteoraPositionExecutor {
     if (mintsNeeded.size === 0) return { lpUsd: 0, feeUsd: 0, count: 0 };
 
     const mintList = Array.from(mintsNeeded).join(',');
-    let prices: Record<string, number> = {};
+    const prices: Record<string, number> = {};
     try {
       const res = await fetch(`https://api.jup.ag/price/v3?ids=${mintList}`, {
         headers: config.jupApiKey ? { 'x-api-key': config.jupApiKey } : {},

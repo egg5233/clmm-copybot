@@ -333,7 +333,7 @@ export async function claimCopyBonus(): Promise<ClaimHistoryEntry> {
   return entry;
 }
 
-async function legacyClaimCopyBonusDisabled(): Promise<ClaimHistoryEntry> {
+async function _legacyClaimCopyBonusDisabled(): Promise<ClaimHistoryEntry> {
   const walletAddress = getUserAddress().toBase58();
   const currentWeek = getISOWeek(new Date());
 
@@ -480,7 +480,7 @@ export interface LpFeeClaimResult {
  *            (Byreal backend broadcasts; 1 sig is enough)
  * Returns on-chain sigs reported by Byreal after broadcast.
  */
-async function legacyClaimLpFeesOffchainDisabled(_connection: Connection): Promise<LpFeeClaimResult> {
+async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Promise<LpFeeClaimResult> {
   const walletAddress = getUserAddress().toBase58();
   logger.info(MODULE, `=== 開始領取全部手續費 (offchain) wallet=${walletAddress.slice(0, 8)} ===`);
 

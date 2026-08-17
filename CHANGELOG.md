@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.33.0 (2026-08-17)
+- **[Infra] Test suite migrated to vitest**: replaced the 20-command `ts-node` chain with vitest (`npm test`); shared env stubs moved to `tests/setup.ts`; floating-promise bugs in async tests fixed by converting to awaited `it()` blocks.
+- **[Infra] Source-grep tests retired**: 13 tests that asserted on source-code substrings were either rewritten as behavioral tests (audit queue, position cap, priority-fee strip, claim CLI parity, fee-payload audit, Jupiter headers, zero-priority builder) or deleted; every retired file's regression intent is recorded in `docs/testing-notes.md`.
+- **[Tests] New unit coverage for pure logic**: `tests/ratio.test.ts` (22 tests — amount scaling, per-wallet overrides, bps truncation edge cases) and `tests/parser.test.ts` (25 tests — Byreal event classification, DEX routing precedence, swap detection from balance deltas).
+- **[Infra] eslint (typescript-eslint) + prettier + GitHub Actions CI**: typecheck, lint, format check, and tests on every push/PR.
+- **[Docs] English README** with architecture/sequence diagrams and signer threat model; original Chinese docs preserved as `README.zh-TW.md`.
+
 ## v1.32.1 (2026-06-25)
 - **[修復] 資產總額走勢偶發顯示「尚無資料」**：圖表容器在資料未就緒時會被設為 `display:none`，導致 `getBoundingClientRect()` 量到 0×0 並提前 return，後續資料到位也無法復原。改為在量測 rect 之前先還原 chart 可見度，避免被卡在 empty 分支。
 

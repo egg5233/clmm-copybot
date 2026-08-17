@@ -467,7 +467,7 @@ export class DammV2PositionExecutor {
       const mintAStr = mintA.toBase58();
       const mintBStr = mintB.toBase58();
       const poolLabel = `${mintAStr}/${mintBStr}@${poolAddress}`;
-      const { tokenAProgram, tokenBProgram } = this.getTokenPrograms(poolState);
+      const { tokenAProgram: _tokenAProgram, tokenBProgram: _tokenBProgram } = this.getTokenPrograms(poolState);
 
       // === PHASE 2: Filters ===
 
@@ -780,7 +780,7 @@ export class DammV2PositionExecutor {
       const { tokenAProgram, tokenBProgram } = this.getTokenPrograms(poolState);
 
       const mapEntry = this.positionMap.toJSON()[targetPositionNft];
-      const targetWalletAddr = mapEntry?.targetWallet || targetWallet;
+      const _targetWalletAddr = mapEntry?.targetWallet || targetWallet;
 
       let deltaA!: BN;
       let deltaB!: BN;
@@ -1193,7 +1193,7 @@ export class DammV2PositionExecutor {
           }
 
           const poolState = await cpAmm.fetchPoolState(new PublicKey(poolAddress));
-          const { tokenAProgram, tokenBProgram } = this.getTokenPrograms(poolState);
+          const { tokenAProgram: _tokenAProgram, tokenBProgram: _tokenBProgram } = this.getTokenPrograms(poolState);
           const positionPda = derivePositionAddress(new PublicKey(myPositionNft));
           const positionNftAta = derivePositionNftAccount(new PublicKey(myPositionNft));
 
@@ -1355,7 +1355,7 @@ export class DammV2PositionExecutor {
     if (dammv2Entries.length === 0) return;
     logger.info(MODULE, `Reconciling ${dammv2Entries.length} DAMM v2 positions...`);
 
-    const cpAmm = new CpAmm(this.readConnection);
+    const _cpAmm = new CpAmm(this.readConnection);
 
     for (const [targetNft, entry] of dammv2Entries) {
       try {
@@ -1534,7 +1534,7 @@ export class DammV2PositionExecutor {
 
     // Fetch prices
     const mintList = Array.from(mintsNeeded).join(',');
-    let prices: Record<string, number> = {};
+    const prices: Record<string, number> = {};
     try {
       const res = await fetch(`https://api.jup.ag/price/v3?ids=${mintList}`, {
         headers: config.jupApiKey ? { 'x-api-key': config.jupApiKey } : {},

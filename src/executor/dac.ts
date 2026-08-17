@@ -12,7 +12,6 @@ import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
-  TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 import { config } from '../config';
 import { logger } from '../utils/logger';

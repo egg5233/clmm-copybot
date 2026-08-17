@@ -5,7 +5,11 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "ts-node tests/position-map.test.ts && ts-node tests/reconcile-log.test.ts && ts-node tests/reconcile-status.test.ts && ts-node tests/byreal-nft-audit.test.ts && ts-node tests/byreal-audit-queue.test.ts && ts-node tests/dashboard-audit-route.test.ts && ts-node tests/byreal-claim-cli-parity.test.ts && ts-node tests/reconcile-background.test.ts && ts-node tests/reconcile-orphan-cleanup.test.ts && ts-node tests/byreal-allow-same-tick.test.ts && ts-node tests/pool-age-whitelist.test.ts && ts-node tests/pool-age-whitelist-config.test.ts && ts-node tests/pool-age-whitelist-source.test.ts && ts-node tests/dashboard-config-source.test.ts && ts-node tests/queue-priority.test.ts && ts-node tests/dashboard-manual-swap-queue.test.ts && ts-node tests/jupiter-api-key-headers.test.ts && ts-node tests/sdk-priority-fee-no-jup-source.test.ts && ts-node tests/jupiter-priority-fee-strip.test.ts && ts-node tests/auto-claim-fee-payload-audit.test.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts"
   },
@@ -26,5 +30,13 @@
     "lodash": "^4.18.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
   }
 }

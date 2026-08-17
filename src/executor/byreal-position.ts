@@ -12,7 +12,7 @@ import { swapForToken, swapViaByrealPool, getActualSwapOutput, jupSwapExactIn, l
 import { PositionMap } from '../state/position-map';
 import { OperationQueue } from './queue';
 import { notifySolInsufficient, notifyOpenFailed, notifyCloseFailed, notifySwapFailed, notifyPumpApproval } from '../discord/notify';
-import { getTokenTvl, getPoolInfo, checkTokenLiquidity } from '../monitor/pool-tvl';
+import { getPoolInfo, checkTokenLiquidity } from '../monitor/pool-tvl';
 import { getLatestTotalUsd } from '../state/portfolio-state';
 import { getAmountRatio } from '../utils/ratio';
 import { isPumpPending, isPumpApproved, isPumpRejected, addPumpPending } from '../state/pump-pending';
@@ -2219,7 +2219,7 @@ export class ByrealPositionExecutor {
         const entryDex = this.positionMap.getDex(tgtNft);
         if (entryDex && entryDex !== 'byreal') continue;
 
-        let isOrphan = false;
+        let isOrphan: boolean;
         try {
           const targetPosition = await this.chain.getPositionInfoByNftMint(new PublicKey(tgtNft));
           isOrphan = classifyByrealReconcileTarget(targetPosition).isOrphan;
@@ -2745,11 +2745,10 @@ export class ByrealPositionExecutor {
         const liquidity: BN = posDecoded.liquidity;
         if (liquidity.isZero()) continue;
 
-        // Decode pool account → sqrtPriceX64, tickCurrent
+        // Decode pool account → sqrtPriceX64, mint decimals
         const poolBuf = Buffer.from(pool.accountBase64, 'base64');
         const poolDecoded = PoolLayout.decode(poolBuf);
         const sqrtPriceX64: BN = poolDecoded.sqrtPriceX64;
-        const tickCurrent: number = poolDecoded.tickCurrent;
         const decA: number = poolDecoded.mintDecimalsA;
         const decB: number = poolDecoded.mintDecimalsB;
 

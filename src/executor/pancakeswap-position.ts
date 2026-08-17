@@ -1,24 +1,23 @@
 import { AccountInfo, ComputeBudgetProgram, Connection, PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import BN from 'bn.js';
-import { Chain, MEMO_PROGRAM_ID, makeTransaction, IGetPositionInfoByNftMintReturn, SqrtPriceMath, LiquidityMath, PoolLayout, PersonalPositionLayout } from 'byreal-clmm-sdk-alpha';
+import { Chain, makeTransaction, IGetPositionInfoByNftMintReturn } from 'byreal-clmm-sdk-alpha';
 import { config, MIN_SDK_PRIORITY_FEE_MICROLAMPORTS } from '../config';
 import { logger } from '../utils/logger';
 import { getUserAddress, signerCallback } from '../utils/wallet';
-import { scaleAmount, getAmountRatio } from '../utils/ratio';
+import { scaleAmount } from '../utils/ratio';
 import { jupiterFetch } from '../utils/jupiter-api';
 import { swapForToken, getActualSwapOutput, lastSwapError } from './jupiter-swap';
 import { PositionMap } from '../state/position-map';
 import { OperationQueue } from './queue';
 import { notifyOpenFailed, notifyCloseFailed, notifySolInsufficient, notifySwapFailed, notifyPumpApproval } from '../discord/notify';
-import { getTokenTvl, getPoolInfo, checkTokenLiquidity } from '../monitor/pool-tvl';
+import { checkTokenLiquidity } from '../monitor/pool-tvl';
 import { isPumpPending, isPumpApproved, isPumpRejected, addPumpPending } from '../state/pump-pending';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const MODULE = 'PcsPos';
-const PENDING_FILE = './data/pending-swaps.json';
 
 // Stablecoins excluded from TVL check
 const STABLE_MINTS = new Set([
@@ -1123,7 +1122,7 @@ export class PcsPositionExecutor {
       } catch { /* use empty prices */ }
     }
 
-    for (const [targetNft, entry] of pcsEntries) {
+    for (const [_targetNft, entry] of pcsEntries) {
       try {
         const ourNft = entry.ourNft;
         const info = await this.chain.getPositionInfoByNftMint(new PublicKey(ourNft));

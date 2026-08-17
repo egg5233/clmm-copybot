@@ -1,57 +1,89 @@
-import assert from 'assert';
-import fs from 'fs';
-import path from 'path';
+import { describe, expect, it } from 'vitest';
 
-process.env.RPC_URL ||= 'http://127.0.0.1:8899';
-process.env.WS_URL ||= 'ws://127.0.0.1:8900';
-process.env.BOT2_WALLET ||= '11111111111111111111111111111111';
+import { diffByrealNftAudit } from '../src/executor/byreal-nft-audit';
+import { ByrealPositionExecutor } from '../src/executor/byreal-position';
+import type { OperationQueue, QueuePriority } from '../src/executor/queue';
 
-const { ByrealPositionExecutor } = require('../src/executor/byreal-position') as typeof import('../src/executor/byreal-position');
-const { diffByrealNftAudit } = require('../src/executor/byreal-nft-audit') as typeof import('../src/executor/byreal-nft-audit');
+const AUDIT_NFT = 'AuditNft111111111111111111111111111111111';
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'executor', 'byreal-position.ts'), 'utf-8');
-const auditStart = source.indexOf('  async auditByrealNftsOnChain()');
-const estimateStart = source.indexOf('  /** Estimate how many positions can be opened', auditStart);
-assert.ok(auditStart >= 0 && estimateStart > auditStart, 'legacy audit method body should be found');
-const auditBody = source.slice(auditStart, estimateStart);
-assert.ok(
-  !auditBody.includes('queueImportedByrealAuditCloses') && !auditBody.includes('.enqueue('),
-  'legacy auditByrealNftsOnChain should remain non-closing and should not enqueue close tasks',
-);
+type Enqueued = { label: string; priority: QueuePriority; fn: () => Promise<void> };
 
-const enqueued: { label: string; priority: string; fn: () => Promise<void> }[] = [];
-const closed: string[] = [];
-const queue = {
-  enqueue(label: string, priority: 'HIGH' | 'NORMAL', fn: () => Promise<void>): string {
-    enqueued.push({ label, priority, fn });
-    return `q-${enqueued.length}`;
-  },
-};
-const fakeExecutor = {
-  manualClosePosition: async (nft: string): Promise<string> => {
-    closed.push(nft);
-    return `tx-${nft}`;
-  },
-};
+function recordingQueue(options: { failOnEnqueue?: boolean } = {}) {
+  const enqueued: Enqueued[] = [];
+  const queue = {
+    enqueue(label: string, priority: QueuePriority, fn: () => Promise<void>): string {
+      if (options.failOnEnqueue) throw new Error('queue is full');
+      enqueued.push({ label, priority, fn });
+      return `q-${enqueued.length}`;
+    },
+  };
+  return { enqueued, queue: queue as unknown as OperationQueue };
+}
 
-const result = diffByrealNftAudit([], ['AuditNft111111111111111111111111111111111']);
-result.importedToMapping.push('AuditNft111111111111111111111111111111111');
+function executorClosing(closed: string[]) {
+  const executor = {
+    manualClosePosition: async (nft: string): Promise<string> => {
+      closed.push(nft);
+      return `tx-${nft}`;
+    },
+  };
+  return executor as unknown as ByrealPositionExecutor;
+}
 
-const updated = (ByrealPositionExecutor.prototype as any).queueImportedByrealAuditCloses.call(
-  fakeExecutor,
-  result,
-  queue,
-);
+function queueImportedCloses(
+  executor: ByrealPositionExecutor,
+  result: ReturnType<typeof diffByrealNftAudit>,
+  queue: OperationQueue,
+) {
+  return ByrealPositionExecutor.prototype.queueImportedByrealAuditCloses.call(executor, result, queue);
+}
 
-assert.deepStrictEqual(updated.closeQueued, ['AuditNft111111111111111111111111111111111']);
-assert.deepStrictEqual(updated.enqueueFailed, []);
-assert.strictEqual(enqueued.length, 1);
-assert.strictEqual(enqueued[0].priority, 'NORMAL');
-assert.ok(enqueued[0].label.includes('AuditNft'), 'queue label should include NFT prefix');
+describe('queueImportedByrealAuditCloses', () => {
+  it('queues a NORMAL-priority close for each NFT imported into the mapping', () => {
+    const result = diffByrealNftAudit([], [AUDIT_NFT]);
+    result.importedToMapping.push(AUDIT_NFT);
+    const { enqueued, queue } = recordingQueue();
 
-enqueued[0].fn().then(() => {
-  assert.deepStrictEqual(closed, ['AuditNft111111111111111111111111111111111']);
-}).catch((err) => {
-  console.error(err);
-  process.exit(1);
+    const updated = queueImportedCloses(executorClosing([]), result, queue);
+
+    expect(updated.closeQueued).toEqual([AUDIT_NFT]);
+    expect(updated.enqueueFailed).toEqual([]);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0].priority).toBe('NORMAL');
+    expect(enqueued[0].label).toContain(AUDIT_NFT.slice(0, 8));
+  });
+
+  it('closes the imported position when the queued task actually runs', async () => {
+    const result = diffByrealNftAudit([], [AUDIT_NFT]);
+    result.importedToMapping.push(AUDIT_NFT);
+    const closed: string[] = [];
+    const { enqueued, queue } = recordingQueue();
+
+    queueImportedCloses(executorClosing(closed), result, queue);
+    await enqueued[0].fn();
+
+    expect(closed).toEqual([AUDIT_NFT]);
+  });
+
+  it('queues nothing for an audit that imported no NFTs, so a plain audit stays non-closing', () => {
+    const result = diffByrealNftAudit(['MappedNft1111111111111111111111111111111'], [AUDIT_NFT]);
+    const { enqueued, queue } = recordingQueue();
+
+    const updated = queueImportedCloses(executorClosing([]), result, queue);
+
+    expect(result.unmappedOnChain).toEqual([AUDIT_NFT]);
+    expect(enqueued).toEqual([]);
+    expect(updated.closeQueued).toEqual([]);
+  });
+
+  it('records an enqueue failure instead of throwing, so one bad NFT cannot abort the audit', () => {
+    const result = diffByrealNftAudit([], [AUDIT_NFT]);
+    result.importedToMapping.push(AUDIT_NFT);
+    const { queue } = recordingQueue({ failOnEnqueue: true });
+
+    const updated = queueImportedCloses(executorClosing([]), result, queue);
+
+    expect(updated.closeQueued).toEqual([]);
+    expect(updated.enqueueFailed).toEqual([{ nft: AUDIT_NFT, message: 'queue is full' }]);
+  });
 });

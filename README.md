@@ -1,5 +1,7 @@
 # CLMM Copy Bot
 
+[![CI](https://github.com/egg5233/clmm-copybot/actions/workflows/ci.yml/badge.svg)](https://github.com/egg5233/clmm-copybot/actions/workflows/ci.yml)
+
 A production Solana LP copy-trading bot that mirrors concentrated-liquidity positions across **five DEXes** — Byreal, Orca Whirlpool, Meteora DLMM, Meteora DAMM v2, and PancakeSwap CLMM — with an out-of-process, policy-enforcing transaction signer.
 
 This system has been running in production with real funds since early 2026. This repository is a sanitized copy of that codebase (clean history, no credentials or strategy parameters), maintained as an engineering showcase.

@@ -1,6 +1,6 @@
-import assert from 'assert';
-import BN from 'bn.js';
 import { PublicKey } from '@solana/web3.js';
+import BN from 'bn.js';
+import { describe, expect, it } from 'vitest';
 
 import { ByrealPositionExecutor } from '../src/executor/byreal-position';
 
@@ -61,53 +61,61 @@ async function runScenario(targetMode: LookupMode, ourMode: LookupMode): Promise
     },
   };
 
+  // enqueueReconcile kicks off an unawaited background scan; the scan paces its
+  // own RPC lookups, so give it a fixed window to drain before asserting.
   executor.enqueueReconcile(queue);
-  await new Promise(resolve => setTimeout(resolve, 650));
+  await new Promise((resolve) => setTimeout(resolve, 650));
 
   return { lookups, deleted, removedReferers, enqueued };
 }
 
-(async () => {
-  {
+describe('Byreal reconcile orphan cleanup', () => {
+  it('deletes the mapping when both target and our position are gone', async () => {
     const result = await runScenario('null', 'null');
-    assert.deepStrictEqual(result.deleted, [TARGET_NFT], 'target gone + our gone should delete mapping');
-    assert.deepStrictEqual(result.removedReferers, [TARGET_NFT], 'target gone + our gone should remove referer');
-    assert.deepStrictEqual(result.enqueued, [], 'target gone + our gone should not enqueue close');
-    assert.deepStrictEqual(result.lookups, [TARGET_NFT, OUR_NFT], 'should check mapped our NFT after target is orphan');
-  }
 
-  {
+    expect(result.deleted).toEqual([TARGET_NFT]);
+    expect(result.removedReferers).toEqual([TARGET_NFT]);
+    expect(result.enqueued).toEqual([]);
+    expect(result.lookups).toEqual([TARGET_NFT, OUR_NFT]);
+  });
+
+  it('keeps the mapping and enqueues a close when our position is still active', async () => {
     const result = await runScenario('null', 'active');
-    assert.deepStrictEqual(result.deleted, [], 'target gone + our active should keep mapping for close');
-    assert.strictEqual(result.enqueued.length, 1, 'target gone + our active should enqueue orphan close');
-  }
 
-  {
+    expect(result.deleted).toEqual([]);
+    expect(result.enqueued).toHaveLength(1);
+  });
+
+  it('keeps the mapping when our lookup fails transiently', async () => {
     const result = await runScenario('null', 'transient-error');
-    assert.deepStrictEqual(result.deleted, [], 'own transient lookup error should keep mapping');
-    assert.deepStrictEqual(result.removedReferers, [], 'own transient lookup error should keep referer');
-    assert.deepStrictEqual(result.enqueued, [], 'own transient lookup error should not enqueue close this cycle');
-  }
 
-  {
+    expect(result.deleted).toEqual([]);
+    expect(result.removedReferers).toEqual([]);
+    expect(result.enqueued).toEqual([]);
+  });
+
+  it('deletes the mapping when our lookup reports the position as not found', async () => {
     const result = await runScenario('null', 'gone-error');
-    assert.deepStrictEqual(result.deleted, [TARGET_NFT], 'own not-found lookup error should delete mapping');
-    assert.deepStrictEqual(result.removedReferers, [TARGET_NFT], 'own not-found lookup error should remove referer');
-    assert.deepStrictEqual(result.enqueued, [], 'own not-found lookup error should not enqueue close');
-  }
 
-  {
+    expect(result.deleted).toEqual([TARGET_NFT]);
+    expect(result.removedReferers).toEqual([TARGET_NFT]);
+    expect(result.enqueued).toEqual([]);
+  });
+
+  it('stops before reading our NFT when the target lookup fails for an unknown reason', async () => {
     const result = await runScenario('unknown-error', 'null');
-    assert.deepStrictEqual(result.lookups, [TARGET_NFT], 'target unknown errors should not read our NFT');
-    assert.deepStrictEqual(result.deleted, [], 'target unknown errors should keep mapping');
-    assert.deepStrictEqual(result.removedReferers, [], 'target unknown errors should keep referer');
-    assert.deepStrictEqual(result.enqueued, [], 'target unknown errors should not enqueue close');
-  }
 
-  {
+    expect(result.lookups).toEqual([TARGET_NFT]);
+    expect(result.deleted).toEqual([]);
+    expect(result.removedReferers).toEqual([]);
+    expect(result.enqueued).toEqual([]);
+  });
+
+  it('deletes the mapping when the target lookup reports not found and our position is gone', async () => {
     const result = await runScenario('gone-error', 'null');
-    assert.deepStrictEqual(result.deleted, [TARGET_NFT], 'target not-found + our gone should delete mapping');
-    assert.deepStrictEqual(result.removedReferers, [TARGET_NFT], 'target not-found + our gone should remove referer');
-    assert.deepStrictEqual(result.enqueued, [], 'target not-found + our gone should not enqueue close');
-  }
-})();
+
+    expect(result.deleted).toEqual([TARGET_NFT]);
+    expect(result.removedReferers).toEqual([TARGET_NFT]);
+    expect(result.enqueued).toEqual([]);
+  });
+});

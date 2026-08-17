@@ -1,4 +1,4 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection } from '@solana/web3.js';
 import { WebSocketMonitor } from '../monitor/websocket';
 import { ByrealPositionExecutor } from '../executor/byreal-position';
 import { OrcaPositionExecutor } from '../executor/orca-position';

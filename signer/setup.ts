@@ -12,7 +12,7 @@ import { encryptKey } from './crypto';
 
 const KEYFILE = path.resolve(__dirname, 'keyfile.enc.json');
 
-function ask(prompt: string, hidden = false): Promise<string> {
+function ask(prompt: string, _hidden = false): Promise<string> {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
     rl.question(prompt, (answer) => {

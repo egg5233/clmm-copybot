@@ -1,39 +1,44 @@
-import assert from 'assert';
+import { describe, expect, it } from 'vitest';
+
 import { applyPoolAgeWhitelistConfig } from '../src/utils/pool-age-whitelist';
 
 function fakeConfig(initial: string[] = []) {
   return { poolAgeWhitelist: new Set(initial) };
 }
 
-{
-  const cfg = fakeConfig();
-  const envUpdates: Record<string, string> = {};
-  const result = applyPoolAgeWhitelistConfig(
-    { poolAgeWhitelist: [' mintA ', '', 'mintB', 'mintA'] },
-    cfg,
-    envUpdates,
-  );
+describe('applyPoolAgeWhitelistConfig', () => {
+  it('trims, filters, and dedupes the incoming list, then persists it to env updates', () => {
+    const cfg = fakeConfig();
+    const envUpdates: Record<string, string> = {};
 
-  assert.deepEqual(Array.from(cfg.poolAgeWhitelist), ['mintA', 'mintB'], 'helper should trim, filter, and dedupe');
-  assert.equal(envUpdates.POOL_AGE_WHITELIST, 'mintA,mintB', 'helper should persist normalized list');
-  assert.equal(result, envUpdates, 'helper should return the envUpdates object it mutated');
-}
+    const result = applyPoolAgeWhitelistConfig(
+      { poolAgeWhitelist: [' mintA ', '', 'mintB', 'mintA'] },
+      cfg,
+      envUpdates,
+    );
 
-{
-  const cfg = fakeConfig(['mintA']);
-  const envUpdates: Record<string, string> = {};
-  applyPoolAgeWhitelistConfig({ poolAgeWhitelist: [] }, cfg, envUpdates);
+    expect(Array.from(cfg.poolAgeWhitelist)).toEqual(['mintA', 'mintB']);
+    expect(envUpdates.POOL_AGE_WHITELIST).toBe('mintA,mintB');
+    expect(result).toBe(envUpdates);
+  });
 
-  assert.deepEqual(Array.from(cfg.poolAgeWhitelist), [], 'empty array should clear whitelist');
-  assert.equal(envUpdates.POOL_AGE_WHITELIST, '', 'empty array should persist an empty env value');
-}
+  it('clears the whitelist and persists an empty env value for an empty array', () => {
+    const cfg = fakeConfig(['mintA']);
+    const envUpdates: Record<string, string> = {};
 
-{
-  const cfg = fakeConfig(['mintA']);
-  const envUpdates: Record<string, string> = {};
-  applyPoolAgeWhitelistConfig({}, cfg, envUpdates);
+    applyPoolAgeWhitelistConfig({ poolAgeWhitelist: [] }, cfg, envUpdates);
 
-  assert.deepEqual(Array.from(cfg.poolAgeWhitelist), ['mintA'], 'missing field should not mutate config');
-  assert.deepEqual(envUpdates, {}, 'missing field should not mutate env updates');
-}
+    expect(Array.from(cfg.poolAgeWhitelist)).toEqual([]);
+    expect(envUpdates.POOL_AGE_WHITELIST).toBe('');
+  });
 
+  it('leaves config and env updates untouched when the field is missing', () => {
+    const cfg = fakeConfig(['mintA']);
+    const envUpdates: Record<string, string> = {};
+
+    applyPoolAgeWhitelistConfig({}, cfg, envUpdates);
+
+    expect(Array.from(cfg.poolAgeWhitelist)).toEqual(['mintA']);
+    expect(envUpdates).toEqual({});
+  });
+});

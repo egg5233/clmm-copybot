@@ -8,11 +8,10 @@ import WebSocket = require('ws');
 import { config, DAC_TOKEN_OPTIONS, normalizeByrealMaxOpenPositions, normalizeDacTargetToken } from '../config';
 import { logger, logEmitter, getRecentLogs, LogEntry } from '../utils/logger';
 import { getUserAddress } from '../utils/wallet';
-import { BotContext, EventLogEntry, SwapHistoryEntry } from './context';
+import { BotContext } from './context';
 import { getAssetTrend, forceSnapshot, getTrendLatestTs } from './asset-trend';
 import { claimCopyBonus, claimLpFeesOffchain, lastClaimTs, lastClaimResult, getClaimHistory } from '../executor/auto-claim';
-import { setPoolTvlRefreshMinutes, getTokenTvl, getTvlCacheInfo, fetchAndCache as refreshTvlCache, checkTokenLiquidity } from '../monitor/pool-tvl';
-import { getJupiterLiquidity } from '../monitor/jupiter-tvl';
+import { setPoolTvlRefreshMinutes, getTvlCacheInfo, fetchAndCache as refreshTvlCache, checkTokenLiquidity } from '../monitor/pool-tvl';
 import { updateEnvFile } from '../utils/env';
 import { normalizeByrealAllowSameTickWallets, serializeWalletSet } from '../utils/byreal-allow-same-tick';
 import { applyPoolAgeWhitelistConfig } from '../utils/pool-age-whitelist';
@@ -410,7 +409,7 @@ function clearFailure(ip: string): void {
 
 // Module-level WS broadcast (set by startDashboard, used by handleAPI)
 let wsClientsRef: Set<WebSocket> | null = null;
-function broadcastWs(type: string, data: any): void {
+function _broadcastWs(type: string, data: any): void {
   if (!wsClientsRef) return;
   const msg = JSON.stringify({ type, data });
   for (const ws of wsClientsRef) {

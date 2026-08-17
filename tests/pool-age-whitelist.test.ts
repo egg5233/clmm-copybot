@@ -1,29 +1,35 @@
-import assert from 'assert';
+import { describe, expect, it } from 'vitest';
+
 import { isPoolAgeWhitelisted, parseMintSet } from '../src/utils/pool-age-whitelist';
 
 const MINT_A = 'MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const MINT_B = 'MintBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 const MINT_C = 'MintCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
 
-{
-  const parsed = parseMintSet('');
-  assert.equal(parsed.size, 0, 'empty input should produce an empty set');
-  assert.equal(isPoolAgeWhitelisted(MINT_A, MINT_B, parsed), false, 'empty whitelist should not bypass');
-}
+describe('parseMintSet', () => {
+  it('produces an empty set for empty input', () => {
+    expect(parseMintSet('').size).toBe(0);
+  });
 
-{
-  const parsed = parseMintSet(` ${MINT_A},, ${MINT_B} , ${MINT_A} `);
-  assert.deepEqual(Array.from(parsed), [MINT_A, MINT_B], 'parser should trim, drop blanks, and dedupe');
-}
+  it('trims, drops blanks, and dedupes', () => {
+    expect(Array.from(parseMintSet(` ${MINT_A},, ${MINT_B} , ${MINT_A} `))).toEqual([
+      MINT_A,
+      MINT_B,
+    ]);
+  });
+});
 
-{
-  const whitelistA = parseMintSet(MINT_A);
-  assert.equal(isPoolAgeWhitelisted(MINT_A, MINT_C, whitelistA), true, 'mintA hit should bypass');
+describe('isPoolAgeWhitelisted', () => {
+  it('does not bypass when the whitelist is empty', () => {
+    expect(isPoolAgeWhitelisted(MINT_A, MINT_B, parseMintSet(''))).toBe(false);
+  });
 
-  const whitelistB = parseMintSet(MINT_B);
-  assert.equal(isPoolAgeWhitelisted(MINT_C, MINT_B, whitelistB), true, 'mintB hit should bypass');
+  it('bypasses when either side of the pair is whitelisted', () => {
+    expect(isPoolAgeWhitelisted(MINT_A, MINT_C, parseMintSet(MINT_A))).toBe(true);
+    expect(isPoolAgeWhitelisted(MINT_C, MINT_B, parseMintSet(MINT_B))).toBe(true);
+  });
 
-  const whitelistNone = parseMintSet(MINT_C);
-  assert.equal(isPoolAgeWhitelisted(MINT_A, MINT_B, whitelistNone), false, 'absent mints should not bypass');
-}
-
+  it('does not bypass when neither mint is whitelisted', () => {
+    expect(isPoolAgeWhitelisted(MINT_A, MINT_B, parseMintSet(MINT_C))).toBe(false);
+  });
+});

@@ -1,30 +1,35 @@
-import assert from 'assert';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-process.env.RPC_URL ||= 'http://127.0.0.1:8899';
-process.env.WS_URL ||= 'ws://127.0.0.1:8900';
-process.env.BOT2_WALLET ||= '11111111111111111111111111111111';
+import { afterEach, describe, expect, it } from 'vitest';
 
-const { PositionMap } = require('../src/state/position-map') as typeof import('../src/state/position-map');
+import { PositionMap } from '../src/state/position-map';
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-map-'));
-const filePath = path.join(dir, 'position-map.json');
+describe('PositionMap', () => {
+  let dir: string;
 
-const map = new PositionMap(filePath);
-const targetNft = 'target-position-nft';
-const ourNft = 'our-position-nft';
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
 
-map.set(targetNft, ourNft, 'MINTA/MINTB', 'target-wallet');
+  it('maps target NFT to our NFT, deletes by our NFT, and persists to disk', () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-map-'));
+    const filePath = path.join(dir, 'position-map.json');
 
-assert.strictEqual(map.findByOurNft(ourNft), targetNft);
-assert.strictEqual(map.deleteByOurNft(ourNft), true);
-assert.strictEqual(map.findByOurNft(ourNft), undefined);
-assert.deepStrictEqual(map.toJSON(), {});
-assert.strictEqual(map.deleteByOurNft('missing-nft'), false);
+    const map = new PositionMap(filePath);
+    const targetNft = 'target-position-nft';
+    const ourNft = 'our-position-nft';
 
-const persisted = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-assert.deepStrictEqual(persisted, {});
+    map.set(targetNft, ourNft, 'MINTA/MINTB', 'target-wallet');
 
-fs.rmSync(dir, { recursive: true, force: true });
+    expect(map.findByOurNft(ourNft)).toBe(targetNft);
+    expect(map.deleteByOurNft(ourNft)).toBe(true);
+    expect(map.findByOurNft(ourNft)).toBeUndefined();
+    expect(map.toJSON()).toEqual({});
+    expect(map.deleteByOurNft('missing-nft')).toBe(false);
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    expect(persisted).toEqual({});
+  });
+});

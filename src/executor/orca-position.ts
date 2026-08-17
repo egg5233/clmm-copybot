@@ -10,7 +10,7 @@ import {
   TokenExtensionUtil,
 } from '@orca-so/whirlpools-sdk';
 import { collectFeesQuote } from '@orca-so/whirlpools-sdk/dist/quotes/public/collect-fees-quote';
-import type { WhirlpoolClient, Whirlpool, Position } from '@orca-so/whirlpools-sdk';
+import type { WhirlpoolClient, Position } from '@orca-so/whirlpools-sdk';
 import { Percentage } from '@orca-so/common-sdk';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -389,7 +389,7 @@ export class OrcaPositionExecutor {
   /** Backfill lockedSol for Orca positions opened before this feature. */
   backfillLockedSol(): void {
     const missing: string[] = [];
-    for (const [targetNft, ourNft] of this.positionMap.entries()) {
+    for (const [targetNft, _ourNft] of this.positionMap.entries()) {
       const dex = this.positionMap.getDex(targetNft);
       if (dex === 'orca' && this.positionMap.getLockedSol(targetNft, -1) === -1) {
         missing.push(targetNft);
@@ -1432,7 +1432,7 @@ export class OrcaPositionExecutor {
 
     // Fetch prices from Jupiter v3
     const mintList = Array.from(mintsNeeded).join(',');
-    let prices: Record<string, number> = {};
+    const prices: Record<string, number> = {};
     try {
       const res = await fetch(`https://api.jup.ag/price/v3?ids=${mintList}`, {
         headers: { 'x-api-key': config.jupApiKey },

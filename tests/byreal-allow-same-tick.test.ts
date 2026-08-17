@@ -1,4 +1,5 @@
-import assert from 'assert';
+import { describe, expect, it } from 'vitest';
+
 import {
   isRefererDuplicateEntry,
   normalizeByrealAllowSameTickWallets,
@@ -10,64 +11,100 @@ const walletA = 'WalletAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const walletB = 'WalletBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 const walletC = 'WalletCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
 
-assert.strictEqual(
-  shouldIgnoreRefererBlocker(walletA, walletB, new Set([walletA]), new Set()),
-  true,
-  'flagged source wallet should not block a different candidate wallet',
-);
-assert.strictEqual(
-  shouldIgnoreRefererBlocker(walletA, walletA, new Set([walletA]), new Set([walletA])),
-  false,
-  'same-tick direction flags should not bypass same-wallet checks',
-);
-assert.strictEqual(
-  shouldIgnoreRefererBlocker(walletA, walletB, new Set(), new Set([walletB])),
-  true,
-  'flagged candidate wallet should be allowed to open after a different source wallet',
-);
+describe('shouldIgnoreRefererBlocker', () => {
+  it('does not let a flagged source wallet block a different candidate wallet', () => {
+    expect(shouldIgnoreRefererBlocker(walletA, walletB, new Set([walletA]), new Set())).toBe(true);
+  });
 
-assert.strictEqual(
-  isRefererDuplicateEntry({ targetWallet: walletA }, walletB, false, new Set(), new Set()),
-  true,
-  'unflagged referer entry from A should block B',
-);
-assert.strictEqual(
-  isRefererDuplicateEntry({ targetWallet: walletA }, walletB, false, new Set([walletA]), new Set()),
-  false,
-  'flagged referer entry from A should not block B',
-);
-assert.strictEqual(
-  isRefererDuplicateEntry({ targetWallet: walletA }, walletB, false, new Set(), new Set([walletB])),
-  false,
-  'flagged candidate wallet B should not be blocked by A',
-);
-assert.strictEqual(
-  isRefererDuplicateEntry({ targetWallet: walletA }, walletA, false, new Set([walletA]), new Set([walletA])),
-  true,
-  'direction flags should still block A when same-wallet reopen is disabled',
-);
-assert.strictEqual(
-  isRefererDuplicateEntry({ targetWallet: walletA }, walletA, true, new Set(), new Set()),
-  false,
-  'same-wallet reopen should keep existing bypass behavior',
-);
-assert.strictEqual(
-  isRefererDuplicateEntry({ targetNft: 'legacy-target' }, walletB, false, new Set([walletA]), new Set([walletB])),
-  true,
-  'legacy referer entries without targetWallet should remain blocking',
-);
+  it('does not let same-tick direction flags bypass same-wallet checks', () => {
+    expect(
+      shouldIgnoreRefererBlocker(walletA, walletA, new Set([walletA]), new Set([walletA])),
+    ).toBe(false);
+  });
 
-const normalized = normalizeByrealAllowSameTickWallets(
-  [walletA, walletB, walletA, ' ', walletC],
-  [walletA, walletC],
-);
-assert.deepStrictEqual(
-  Array.from(normalized),
-  [walletA, walletC],
-  'normalization should dedupe and prune wallets not in current Byreal full-copy targets',
-);
-assert.strictEqual(
-  serializeWalletSet(normalized),
-  `${walletA},${walletC}`,
-  'serialization should write comma-separated wallet addresses',
-);
+  it('allows a flagged candidate wallet to open after a different source wallet', () => {
+    expect(shouldIgnoreRefererBlocker(walletA, walletB, new Set(), new Set([walletB]))).toBe(true);
+  });
+});
+
+describe('isRefererDuplicateEntry', () => {
+  it('blocks B on an unflagged referer entry from A', () => {
+    expect(
+      isRefererDuplicateEntry({ targetWallet: walletA }, walletB, false, new Set(), new Set()),
+    ).toBe(true);
+  });
+
+  it('does not block B when the referer entry from A is flagged', () => {
+    expect(
+      isRefererDuplicateEntry(
+        { targetWallet: walletA },
+        walletB,
+        false,
+        new Set([walletA]),
+        new Set(),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not block a flagged candidate wallet B', () => {
+    expect(
+      isRefererDuplicateEntry(
+        { targetWallet: walletA },
+        walletB,
+        false,
+        new Set(),
+        new Set([walletB]),
+      ),
+    ).toBe(false);
+  });
+
+  it('still blocks A on direction flags when same-wallet reopen is disabled', () => {
+    expect(
+      isRefererDuplicateEntry(
+        { targetWallet: walletA },
+        walletA,
+        false,
+        new Set([walletA]),
+        new Set([walletA]),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps the existing same-wallet reopen bypass', () => {
+    expect(
+      isRefererDuplicateEntry({ targetWallet: walletA }, walletA, true, new Set(), new Set()),
+    ).toBe(false);
+  });
+
+  it('keeps legacy referer entries without targetWallet blocking', () => {
+    expect(
+      isRefererDuplicateEntry(
+        { targetNft: 'legacy-target' },
+        walletB,
+        false,
+        new Set([walletA]),
+        new Set([walletB]),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('normalizeByrealAllowSameTickWallets', () => {
+  it('dedupes and prunes wallets that are not current Byreal full-copy targets', () => {
+    const normalized = normalizeByrealAllowSameTickWallets(
+      [walletA, walletB, walletA, ' ', walletC],
+      [walletA, walletC],
+    );
+
+    expect(Array.from(normalized)).toEqual([walletA, walletC]);
+  });
+
+  it('serializes a wallet set as a comma-separated list', () => {
+    const normalized = normalizeByrealAllowSameTickWallets(
+      [walletA, walletB, walletA, ' ', walletC],
+      [walletA, walletC],
+    );
+
+    expect(serializeWalletSet(normalized)).toBe(`${walletA},${walletC}`);
+  });
+});
