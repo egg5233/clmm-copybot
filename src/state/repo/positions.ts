@@ -6,7 +6,7 @@
  * module and awaits the calls; no call-site logic should need rethinking.
  */
 
-import { fromTimestamp, numberOrUndefined, query } from '../db';
+import { fromTimestamp, numberOrUndefined, query, toTimestamp } from '../db';
 
 export interface PositionEntry {
   ourNft: string;
@@ -89,6 +89,45 @@ export async function set(
       tickLower ?? null,
       tickUpper ?? null,
       dex ?? null,
+    ],
+  );
+}
+
+/**
+ * Write a mapping exactly as it was stored, `createdAt` included.
+ *
+ * set() is the executors' call and deliberately stamps created_at with now(),
+ * because reusing a target NFT means a new position. The backfill wants the
+ * opposite — the row as the JSON file had it, open time and all — so it gets its
+ * own upsert rather than set() growing a flag to mean both things.
+ */
+export async function importEntry(targetNft: string, entry: PositionEntry): Promise<void> {
+  await query(
+    `INSERT INTO positions (target_nft, our_nft, pool, target_wallet, tick_lower, tick_upper, dex,
+                            locked_sol, target_liquidity, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+     ON CONFLICT (target_nft) DO UPDATE SET
+       our_nft          = EXCLUDED.our_nft,
+       pool             = EXCLUDED.pool,
+       target_wallet    = EXCLUDED.target_wallet,
+       tick_lower       = EXCLUDED.tick_lower,
+       tick_upper       = EXCLUDED.tick_upper,
+       dex              = EXCLUDED.dex,
+       locked_sol       = EXCLUDED.locked_sol,
+       target_liquidity = EXCLUDED.target_liquidity,
+       created_at       = EXCLUDED.created_at,
+       updated_at       = now()`,
+    [
+      targetNft,
+      entry.ourNft,
+      entry.pool ?? null,
+      entry.targetWallet ?? null,
+      entry.tickLower ?? null,
+      entry.tickUpper ?? null,
+      entry.dex ?? null,
+      entry.lockedSol ?? null,
+      entry.targetLiquidity ?? null,
+      toTimestamp(entry.createdAt),
     ],
   );
 }

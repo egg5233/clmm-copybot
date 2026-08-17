@@ -2,11 +2,9 @@
  * DAC — Daily Auto-Convert
  * - Every day at dacExecuteHour:dacExecuteMinute (Asia/Taipei), check yesterday's profit
  * - If profit >= dacAmountUsd * dacThresholdMultiplier, swap USDC to the selected BTC token and transfer out
- * - History persisted to ./data/dac-history.json (max 365 records)
+ * - History persisted to Postgres (dac_history, max 365 records)
  */
 
-import fs from 'fs';
-import path from 'path';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddressSync,
@@ -18,29 +16,20 @@ import { logger } from '../utils/logger';
 import { getUserAddress, signLegacy } from '../utils/wallet';
 import { jupSwapExactIn } from './jupiter-swap';
 import { forceSnapshot, getAssetTrend } from '../dashboard/asset-trend';
+import { histories } from '../state/repo';
+import type { DacRecord } from '../state/repo/histories';
+import { WriteChain } from '../state/write-chain';
 
 const MODULE = 'DAC';
-const DAC_HISTORY_FILE = path.resolve('./data/dac-history.json');
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface DacRecord {
-  ts: number;
-  profitUsd: number;
-  dacAmountUsd: number;
-  cbbtcReceived: string;
-  tokenReceived?: string;
-  tokenSymbol?: string;
-  tokenMint?: string;
-  swapSig: string | null;
-  transferSig: string | null;
-  transferTo: string;
-  status: 'success' | 'skipped' | 'swap_failed' | 'transfer_failed';
-  reason?: string;
-}
+// The record's shape is owned by the repository that stores it; re-exported here
+// because this module is where callers expect to find it.
+export type { DacRecord };
 
 // ---------------------------------------------------------------------------
 // State
@@ -50,31 +39,22 @@ let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 let dacHistory: DacRecord[] = [];
 let nextScheduledTime = 0;
 let dacRunning = false;
+const writes = new WriteChain(MODULE);
 
 // ---------------------------------------------------------------------------
 // History persistence
 // ---------------------------------------------------------------------------
 
-function loadDacHistory(): void {
-  try {
-    if (fs.existsSync(DAC_HISTORY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DAC_HISTORY_FILE, 'utf-8'));
-      if (Array.isArray(data)) dacHistory = data;
-    }
-  } catch {
-    /* start fresh */
-  }
+/** Load the DAC runs from Postgres and arm the write-through. */
+async function loadDacHistory(): Promise<void> {
+  dacHistory = await histories.listDac();
+  writes.enable();
+  logger.info(MODULE, `Loaded ${dacHistory.length} DAC records from Postgres`);
 }
 
-function saveDacHistory(): void {
-  try {
-    const dir = path.dirname(DAC_HISTORY_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    while (dacHistory.length > 365) dacHistory.shift();
-    fs.writeFileSync(DAC_HISTORY_FILE, JSON.stringify(dacHistory, null, 2));
-  } catch (err: any) {
-    logger.warn(MODULE, `Could not save DAC history: ${err.message}`);
-  }
+/** Resolves once every queued DAC write has reached Postgres. For shutdown. */
+export async function flushDacHistory(): Promise<void> {
+  await writes.drain();
 }
 
 // ---------------------------------------------------------------------------
@@ -499,7 +479,8 @@ export async function triggerDac(
 
   // Save and notify
   dacHistory.push(record);
-  saveDacHistory();
+  while (dacHistory.length > histories.MAX_DAC_HISTORY) dacHistory.shift();
+  writes.push('DAC history', () => histories.pushDac(record));
   await sendDacNotification(record);
 
   logger.info(MODULE, `=== DAC complete: ${record.status} ===`);
@@ -510,8 +491,8 @@ export async function triggerDac(
 // Public API
 // ---------------------------------------------------------------------------
 
-export function startDacScheduler(connection: Connection): void {
-  loadDacHistory();
+export async function startDacScheduler(connection: Connection): Promise<void> {
+  await loadDacHistory();
   if (!config.dacEnabled) {
     logger.info(MODULE, 'DAC disabled (DAC_ENABLED != true)');
     return;

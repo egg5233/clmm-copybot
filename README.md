@@ -134,7 +134,7 @@ docs/                        # design documents
 | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | Vitest migration + lint + CI                                                                                                            | done — 141 tests                     |
 | **Rust signer** (`signer-rs/`): drop-in daemon, differential test harness vs the TS implementation, byte-identical signing verification | done — 170 tests, 18/18 differential |
-| **Postgres persistence**: replace JSON-file state with a repository layer, migrations, docker-compose                                   | in progress                          |
+| **Postgres persistence**: replace JSON-file state with a repository layer, migrations, docker-compose                                   | done — 12 tables, 159 DB tests       |
 | Prometheus metrics + health endpoints                                                                                                   | planned                              |
 
 ## License

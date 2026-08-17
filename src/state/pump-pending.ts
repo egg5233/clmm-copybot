@@ -1,12 +1,21 @@
+/**
+ * pump.fun tokens waiting on a Discord approval before the bot will copy them.
+ *
+ * The approval round-trip lives here; storage is `repo.pumpPending`. Every read
+ * is synchronous because the five executors call them while deciding whether to
+ * open, and every mutation updates memory and queues the matching row write.
+ */
+
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { updateEnvFile } from '../utils/env';
 import { notifyPumpExpired } from '../discord/notify';
+import { pumpPending } from './repo';
+import { WriteChain } from './write-chain';
 
 const MODULE = 'PumpPending';
-const DATA_FILE = path.resolve('./data/pump-pending.json');
 const EXPIRY_MS = 60 * 60 * 1000; // 1 hour
 
 // ---------------------------------------------------------------------------
@@ -28,31 +37,22 @@ export interface PumpPendingEntry {
 // State
 // ---------------------------------------------------------------------------
 
-let pendingMap: Record<string, PumpPendingEntry> = {};
+const pendingMap: Record<string, PumpPendingEntry> = {};
+const writes = new WriteChain(MODULE);
 
-function loadFromDisk(): void {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      pendingMap = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-    }
-  } catch {
-    logger.warn(MODULE, 'Could not load pump-pending.json, starting fresh');
-    pendingMap = {};
-  }
+/** Load the pending/approved/rejected tokens from Postgres and arm the write-through. */
+export async function initPumpPending(): Promise<void> {
+  const entries = await pumpPending.list();
+  for (const key of Object.keys(pendingMap)) delete pendingMap[key];
+  for (const entry of entries) pendingMap[entry.mint] = entry;
+  writes.enable();
+  logger.info(MODULE, `Loaded ${entries.length} pump token decisions from Postgres`);
 }
 
-function saveToDisk(): void {
-  try {
-    const dir = path.dirname(DATA_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(pendingMap, null, 2));
-  } catch (err: any) {
-    logger.warn(MODULE, `Could not save pump-pending.json: ${err.message}`);
-  }
+/** Resolves once every queued write has reached Postgres. For shutdown and tests. */
+export async function flushPumpPending(): Promise<void> {
+  await writes.drain();
 }
-
-// Load on module init
-loadFromDisk();
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -76,7 +76,7 @@ export function isPumpRejected(mint: string): boolean {
 
 export function addPumpPending(entry: Omit<PumpPendingEntry, 'status'>): void {
   pendingMap[entry.mint] = { ...entry, status: 'pending' };
-  saveToDisk();
+  writes.push(`pump token ${entry.symbol}`, () => pumpPending.add(entry));
   logger.info(MODULE, `Added pending pump token: ${entry.symbol} (${entry.mint})`);
 }
 
@@ -85,10 +85,18 @@ export function resolvePump(mint: string, status: 'approved' | 'rejected'): void
   if (!entry) return;
   entry.status = status;
   entry.resolvedAt = Date.now();
-  saveToDisk();
+  // setStatus rather than approve()/reject(): those refuse a row that is no
+  // longer pending, and the decision has already been taken in memory above —
+  // including by the dashboard route, which lets an operator flip one.
+  const resolvedAt = entry.resolvedAt;
+  writes.push(`pump resolution ${entry.symbol}`, () =>
+    pumpPending.setStatus(mint, status, resolvedAt),
+  );
   logger.info(MODULE, `Resolved pump token ${entry.symbol}: ${status}`);
 
-  // Persist symbol to token-names.json so Dashboard can enrich blacklist/whitelist
+  // Persist symbol to the token-names cache so Dashboard can enrich
+  // blacklist/whitelist. That file stays on disk: it is a rebuildable API cache,
+  // not state, and is the one write this module still makes to ./data.
   try {
     const tnFile = path.resolve('./data/token-names.json');
     const tnCache = fs.existsSync(tnFile) ? JSON.parse(fs.readFileSync(tnFile, 'utf-8')) : {};
@@ -113,7 +121,7 @@ export function resolvePump(mint: string, status: 'approved' | 'rejected'): void
 
 export function deletePumpEntry(mint: string): void {
   delete pendingMap[mint];
-  saveToDisk();
+  writes.push(`pump entry removal ${mint.slice(0, 8)}`, () => pumpPending.delete(mint));
   logger.info(MODULE, `Deleted pump entry: ${mint}`);
 }
 

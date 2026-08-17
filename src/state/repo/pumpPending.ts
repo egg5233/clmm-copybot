@@ -75,6 +75,39 @@ export async function add(entry: Omit<PumpPendingEntry, 'status'>): Promise<void
 }
 
 /**
+ * Write an entry exactly as it was stored, status and resolution included.
+ *
+ * add() always lands a row as 'pending' because that is what detecting a token
+ * means; the backfill has to carry approved and rejected rows across unchanged,
+ * so it gets its own upsert.
+ */
+export async function importEntry(entry: PumpPendingEntry): Promise<void> {
+  await query(
+    `INSERT INTO pump_pending (mint, symbol, pool, target_wallet, detected_at, status,
+                               notified_at, resolved_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (mint) DO UPDATE SET
+       symbol        = EXCLUDED.symbol,
+       pool          = EXCLUDED.pool,
+       target_wallet = EXCLUDED.target_wallet,
+       detected_at   = EXCLUDED.detected_at,
+       status        = EXCLUDED.status,
+       notified_at   = EXCLUDED.notified_at,
+       resolved_at   = EXCLUDED.resolved_at`,
+    [
+      entry.mint,
+      entry.symbol,
+      entry.pool,
+      entry.targetWallet,
+      toTimestamp(entry.detectedAt),
+      entry.status,
+      entry.notifiedAt === undefined ? null : toTimestamp(entry.notifiedAt),
+      entry.resolvedAt === undefined ? null : toTimestamp(entry.resolvedAt),
+    ],
+  );
+}
+
+/**
  * Resolve a token, stamping resolvedAt.
  *
  * Only rows still pending are touched, so a late Discord reply cannot flip an
@@ -96,6 +129,27 @@ async function resolve(
   );
   const row = res.rows[0];
   return row ? toEntry(row) : undefined;
+}
+
+/**
+ * Set a token's decision whatever its current one is.
+ *
+ * approve()/reject() refuse to touch a row that is no longer pending, which is
+ * what the Discord poller wants of a late reply. The dashboard's resolve route
+ * has no such guard — an operator can flip an approved token to rejected — and
+ * `src/state/pump-pending.ts` mirrors its in-memory decision rather than making
+ * it a second time, so it needs the unconditional form.
+ */
+export async function setStatus(
+  mint: string,
+  status: PumpStatus,
+  resolvedAt: number,
+): Promise<void> {
+  await query('UPDATE pump_pending SET status = $2, resolved_at = $3 WHERE mint = $1', [
+    mint,
+    status,
+    toTimestamp(resolvedAt),
+  ]);
 }
 
 export function approve(

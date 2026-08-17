@@ -12,5 +12,5 @@
       "node-pg-migrate": ["./node_modules/node-pg-migrate/dist/bundle/index.d.ts"]
     }
   },
-  "include": ["src/**/*", "tests/**/*", "vitest.config.ts"]
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "vitest.config.ts"]
 }

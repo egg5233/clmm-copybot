@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 import {
   AccountInfo,
   ComputeBudgetProgram,
@@ -65,6 +64,14 @@ import {
   isPumpRejected,
   addPumpPending,
 } from '../state/pump-pending';
+import { allTokenPnl, getTokenPnl, setTokenPnl } from '../state/token-pnl-store';
+import {
+  addOpenedReferer,
+  allOpenedReferers,
+  countOpenedReferers,
+  getOpenedReferer,
+  removeOpenedRefererByTargetNft,
+} from '../state/opened-referers-store';
 import { classifyByrealReconcilePosition, classifyByrealReconcileTarget } from './reconcile-status';
 import { ByrealNftAuditResult, diffByrealNftAudit } from './byreal-nft-audit';
 import { isRefererDuplicateEntry } from '../utils/byreal-allow-same-tick';
@@ -264,9 +271,6 @@ export class ByrealPositionExecutor {
   /** Cached rent per position in SOL — queried from RPC at startup, fallback to 0.0090132 */
   public rentPerPosition: number = 0.0090132;
 
-  private static REFERER_FILE = './data/opened-referers.json';
-  private static PNL_FILE = './data/token-pnl.json';
-
   constructor(connection: Connection, positionMap: PositionMap) {
     this.connection = connection;
     this.readConnection = config.readRpcUrl
@@ -283,11 +287,10 @@ export class ByrealPositionExecutor {
       return new Chain({ connection: conn, programId: config.byrealProgramId });
     });
     this.positionMap = positionMap;
-    // Log referer dedup state on startup
-    const refererData = this.readRefererFile();
-    const refererCount = Object.keys(refererData).length;
+    // Log referer dedup state on startup (the shared store has already loaded it)
+    const refererCount = countOpenedReferers();
     if (refererCount > 0) {
-      logger.info(MODULE, `Found ${refererCount} opened referers on disk`);
+      logger.info(MODULE, `Found ${refererCount} opened referers`);
     }
     // Log pending state on startup (the shared store has already loaded it)
     const pendingCount = countPendingSwaps();
@@ -378,15 +381,19 @@ export class ByrealPositionExecutor {
       this.tokenCooldowns.delete(token);
     }
 
-    // 持久化 PnL 資料到磁碟
-    const pnlData = this.readPnlFile();
-    const rec = pnlData[token] || { totalPnl: 0, tradeCount: 0, lastLossPnl: 0, lastTradeAt: 0 };
+    // 持久化 PnL 資料
+    const rec: Record<string, any> = {
+      totalPnl: 0,
+      tradeCount: 0,
+      lastLossPnl: 0,
+      lastTradeAt: 0,
+      ...getTokenPnl(token),
+    };
     rec.totalPnl = (rec.totalPnl || 0) + pnlUsd;
     rec.tradeCount = (rec.tradeCount || 0) + 1;
     if (pnlUsd < 0) rec.lastLossPnl = pnlUsd;
     rec.lastTradeAt = Date.now();
-    pnlData[token] = rec;
-    this.writePnlFile(pnlData);
+    setTokenPnl(token, rec);
   }
 
   /** Check if a token is in the blacklist (blocks OPEN for this token) */
@@ -520,15 +527,17 @@ export class ByrealPositionExecutor {
 
   /** Read opened referers (public for dashboard). */
   getOpenedReferers(): Record<string, any> {
-    return this.readRefererFile();
+    return allOpenedReferers();
   }
 
   /** Check if a referer position was already opened (public for skip detection). */
   isRefererDuplicate(refererPosition: string | null, targetWallet: string): boolean {
     if (!refererPosition) return false;
-    const entry = this.readRefererFile()[refererPosition];
+    // Only the opening wallet matters to the decision, and passing just that keeps
+    // the helper independent of how a referer entry is stored.
+    const entry = getOpenedReferer(refererPosition);
     return isRefererDuplicateEntry(
-      entry,
+      entry && { targetWallet: entry.targetWallet },
       targetWallet,
       config.allowSameWalletReopen,
       config.byrealAllowSameTickWallets,
@@ -2395,58 +2404,12 @@ export class ByrealPositionExecutor {
     deletePendingSwap(inputMint);
   }
 
-  // --- Token PnL file (persisted across restarts) ---
-
-  /** Read PnL data from disk. */
-  private readPnlFile(): Record<string, any> {
-    try {
-      const filePath = ByrealPositionExecutor.PNL_FILE;
-      if (!fs.existsSync(filePath)) return {};
-      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-
-  /** Write PnL data to disk. */
-  private writePnlFile(data: Record<string, any>): void {
-    try {
-      const filePath = ByrealPositionExecutor.PNL_FILE;
-      const dir = path.dirname(filePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      logger.error(MODULE, `Could not save PnL data: ${err.message}`);
-    }
-  }
-
   /** Get all persisted token PnL data (public for dashboard). */
   getTokenPnlData(): Record<string, any> {
-    return this.readPnlFile();
+    return allTokenPnl();
   }
 
-  // --- Referer dedup file (persisted across restarts) ---
-
-  private readRefererFile(): Record<string, any> {
-    try {
-      const filePath = ByrealPositionExecutor.REFERER_FILE;
-      if (!fs.existsSync(filePath)) return {};
-      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-
-  private writeRefererFile(data: Record<string, any>): void {
-    try {
-      const filePath = ByrealPositionExecutor.REFERER_FILE;
-      const dir = path.dirname(filePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      logger.error(MODULE, `Could not save referer state: ${err.message}`);
-    }
-  }
+  // --- Referer dedup (persisted across restarts) ---
 
   private addReferer(
     refererPosition: string,
@@ -2454,21 +2417,12 @@ export class ByrealPositionExecutor {
     ourNft: string,
     targetWallet: string,
   ): void {
-    const data = this.readRefererFile();
-    data[refererPosition] = { targetNft, ourNft, targetWallet, openedAt: Date.now() };
-    this.writeRefererFile(data);
+    addOpenedReferer(refererPosition, targetNft, ourNft, targetWallet);
   }
 
   /** Remove referer entry when position is closed (allows re-opening if provider opens again). */
   private removeReferer(targetNftMint: string): void {
-    const data = this.readRefererFile();
-    for (const [referer, entry] of Object.entries(data)) {
-      if ((entry as any).targetNft === targetNftMint) {
-        delete data[referer];
-        this.writeRefererFile(data);
-        return;
-      }
-    }
+    removeOpenedRefererByTargetNft(targetNftMint);
   }
 
   /** Resolve token mint to symbol from token-names cache. */

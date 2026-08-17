@@ -1,13 +1,23 @@
-import fs from 'fs';
-import path from 'path';
+/**
+ * The five-minute portfolio snapshot behind the dashboard's asset chart.
+ *
+ * The three tiers stay in memory and are handed to the dashboard as arrays, so
+ * rendering is still a synchronous read. Persistence is `repo.snapshots`: one
+ * INSERT per snapshot on the write chain, where the file version rewrote all
+ * three arrays — around 1.2MB once the unbounded daily tier had built up — every
+ * five minutes.
+ */
+
 import { config } from '../config';
 import { getUserAddress } from '../utils/wallet';
 import { getSolPrice, updateSolPrice } from './server';
 import { logger } from '../utils/logger';
 import { setLatestTotalUsd } from '../state/portfolio-state';
+import { snapshots } from '../state/repo';
+import type { Granularity } from '../state/repo/snapshots';
+import { WriteChain } from '../state/write-chain';
 
 const MODULE = 'AssetTrend';
-const TREND_FILE = './data/asset-trend.json';
 const COLLECT_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const ANOMALY_PCT = 0.01; // 1% — re-query if totalUsd swings more than this ratio
 const ANOMALY_REQUERY_DELAY = 60_000; // wait 60s before re-querying on anomaly
@@ -62,6 +72,7 @@ export interface TrendData {
 
 let trendData: TrendData = { raw: [], hourly: [], daily: [] };
 let timer: ReturnType<typeof setInterval> | null = null;
+const writes = new WriteChain(MODULE);
 
 // Callback invoked after each snapshot with the latest totalUsd
 let snapshotCallback: ((totalUsd: number) => void) | null = null;
@@ -88,100 +99,24 @@ function floorToDay(ts: number): number {
   return Math.floor(ts / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
 }
 
-function tryParseTrendFile(filePath: string): TrendData | null {
-  try {
-    if (!fs.existsSync(filePath)) return null;
-    const content = fs.readFileSync(filePath, 'utf-8');
-    if (!content.trim()) return null; // empty file (truncated mid-write)
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      // Old flat array format
-      return { raw: parsed, hourly: [], daily: [] };
-    }
-    if (parsed && typeof parsed === 'object' && parsed.raw) {
-      return {
-        raw: Array.isArray(parsed.raw) ? parsed.raw : [],
-        hourly: Array.isArray(parsed.hourly) ? parsed.hourly : [],
-        daily: Array.isArray(parsed.daily) ? parsed.daily : [],
-      };
-    }
-    return null;
-  } catch (err: any) {
-    logger.warn(MODULE, `Failed to parse ${filePath}: ${err.message}`);
-    return null;
-  }
-}
-
-function loadTrend(): void {
-  // Try main file first, then backup, then preserve in-memory state
-  let loaded = tryParseTrendFile(TREND_FILE);
-  if (!loaded) {
-    const backupFile = TREND_FILE + '.bak';
-    if (fs.existsSync(backupFile)) {
-      logger.warn(MODULE, `Main trend file unreadable, attempting recovery from ${backupFile}`);
-      loaded = tryParseTrendFile(backupFile);
-      if (loaded) {
-        logger.info(
-          MODULE,
-          `Recovered trend from backup: raw=${loaded.raw.length} hourly=${loaded.hourly.length} daily=${loaded.daily.length}`,
-        );
-      }
-    }
-  }
-
-  if (loaded) {
-    // Detect old flat array format and rebuild aggregates
-    if (loaded.hourly.length === 0 && loaded.daily.length === 0 && loaded.raw.length > 0) {
-      // Could be migration case OR new install — only rebuild if file was actually old format (array)
-      const raw = fs.existsSync(TREND_FILE) ? fs.readFileSync(TREND_FILE, 'utf-8') : '';
-      if (raw.trim().startsWith('[')) {
-        logger.info(
-          MODULE,
-          `Migrating ${loaded.raw.length} old-format snapshots to tiered structure`,
-        );
-        trendData = loaded;
-        rebuildAggregates();
-        saveTrend();
-      } else {
-        trendData = loaded;
-      }
-    } else {
-      trendData = loaded;
-    }
-  } else if (fs.existsSync(TREND_FILE)) {
-    // File exists but unreadable AND no backup — preserve in-memory (don't wipe)
-    logger.error(
-      MODULE,
-      `Trend file is corrupt and no backup available — keeping in-memory state intact`,
-    );
-    // trendData stays as whatever it was (initial { raw:[], hourly:[], daily:[] } on first load)
-  }
-
-  // Dedup hourly tier — fix historical bug that wrote multiple entries per hour
-  if (trendData.hourly.length > 0) {
-    const hourMap = new Map<number, AssetSnapshot>();
-    for (const snap of trendData.hourly) {
-      hourMap.set(floorToHour(snap.ts), snap); // last entry per hour wins
-    }
-    const dedupedH = [...hourMap.entries()].sort((a, b) => a[0] - b[0]).map(([, s]) => s);
-    if (dedupedH.length < trendData.hourly.length) {
-      logger.info(MODULE, `Hourly dedup: ${trendData.hourly.length} → ${dedupedH.length}`);
-      trendData.hourly = dedupedH;
-    }
-  }
-
-  // Dedup daily tier — fix historical bug that wrote multiple entries per day
-  if (trendData.daily.length > 0) {
-    const dayMap = new Map<number, AssetSnapshot>();
-    for (const snap of trendData.daily) {
-      dayMap.set(floorToDay(snap.ts), snap); // last entry per day wins
-    }
-    const deduped = [...dayMap.entries()].sort((a, b) => a[0] - b[0]).map(([, s]) => s);
-    if (deduped.length < trendData.daily.length) {
-      logger.info(MODULE, `Daily dedup: ${trendData.daily.length} → ${deduped.length}`);
-      trendData.daily = deduped;
-    }
-  }
+/**
+ * Load the three tiers from Postgres and arm the write-through.
+ *
+ * Each tier is read back at its own retention limit, so memory holds exactly
+ * what the chart draws. Three things the file version needed are gone with the
+ * file: the .tmp/.bak rotation and its corrupt-file recovery (a truncated write
+ * is not a failure mode of an INSERT), the flat-array format detection (the
+ * backfill script owns that now), and the hourly/daily dedup passes that ran on
+ * every startup to repair duplicate writes — `UNIQUE (granularity, ts)` stops
+ * those duplicates forming at all.
+ */
+async function loadTrend(): Promise<void> {
+  const [raw, hourly, daily] = await Promise.all([
+    snapshots.latest('raw', MAX_RAW),
+    snapshots.latest('hourly', MAX_HOURLY),
+    snapshots.all('daily'),
+  ]);
+  trendData = { raw, hourly, daily };
 
   // Init aggregation trackers from existing data
   if (trendData.hourly.length > 0) {
@@ -190,45 +125,13 @@ function loadTrend(): void {
   if (trendData.daily.length > 0) {
     lastAggregatedDay = floorToDay(trendData.daily[trendData.daily.length - 1].ts);
   }
+
+  writes.enable();
 }
 
-/** Rebuild hourly/daily aggregates from raw data (used during migration) */
-function rebuildAggregates(): void {
-  const hourMap = new Map<number, AssetSnapshot>();
-  const dayMap = new Map<number, AssetSnapshot>();
-
-  for (const snap of trendData.raw) {
-    const hourKey = floorToHour(snap.ts);
-    hourMap.set(hourKey, snap); // last snapshot wins (represents end-of-hour)
-    const dayKey = floorToDay(snap.ts);
-    dayMap.set(dayKey, snap);
-  }
-
-  // Sort by key and extract values
-  trendData.hourly = [...hourMap.entries()].sort((a, b) => a[0] - b[0]).map(([, snap]) => snap);
-  trendData.daily = [...dayMap.entries()].sort((a, b) => a[0] - b[0]).map(([, snap]) => snap);
-}
-
-function saveTrend(): void {
-  try {
-    const dir = path.dirname(TREND_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    // Atomic write: write to temp, rotate current → .bak, rename temp → current
-    const tmpFile = TREND_FILE + '.tmp';
-    const backupFile = TREND_FILE + '.bak';
-    const payload = JSON.stringify(trendData);
-    fs.writeFileSync(tmpFile, payload);
-    if (fs.existsSync(TREND_FILE)) {
-      try {
-        fs.copyFileSync(TREND_FILE, backupFile);
-      } catch {
-        /* best-effort */
-      }
-    }
-    fs.renameSync(tmpFile, TREND_FILE);
-  } catch (err: any) {
-    logger.warn(MODULE, `Failed to save trend: ${err.message}`);
-  }
+/** Resolves once every queued snapshot write has reached Postgres. For shutdown and tests. */
+export async function flushAssetTrend(): Promise<void> {
+  await writes.drain();
 }
 
 export function getAssetTrend(): TrendData {
@@ -567,10 +470,14 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
   };
 }
 
-/** Write a snapshot to trendData, aggregate tiers, enforce retention, save, and notify. */
+/** Write a snapshot to trendData, aggregate tiers, enforce retention, persist, and notify. */
 function commitSnapshot(snapshot: AssetSnapshot): void {
   trendData.raw.push(snapshot);
-  aggregateTiers(snapshot);
+  writes.push('asset snapshot', () => snapshots.insert('raw', snapshot));
+
+  for (const [granularity, promoted] of aggregateTiers(snapshot)) {
+    writes.push(`${granularity} asset snapshot`, () => snapshots.insert(granularity, promoted));
+  }
 
   // Enforce retention limits
   const now = Date.now();
@@ -586,7 +493,15 @@ function commitSnapshot(snapshot: AssetSnapshot): void {
     trendData.hourly.splice(0, trendData.hourly.length - MAX_HOURLY);
   }
 
-  saveTrend();
+  // The same two limits the arrays above just applied, in SQL. Both the time
+  // window and the count cap are kept because the file version enforced both.
+  writes.push('asset snapshot retention', async () => {
+    await snapshots.pruneOlderThan('raw', rawCutoff);
+    await snapshots.prune('raw', MAX_RAW);
+    await snapshots.pruneOlderThan('hourly', hourlyCutoff);
+    await snapshots.prune('hourly', MAX_HOURLY);
+  });
+
   logger.info(
     MODULE,
     `Snapshot: $${snapshot.totalUsd.toFixed(2)} (tokens=$${snapshot.tokensUsd.toFixed(2)} lp=$${snapshot.lpValueUsd.toFixed(2)} fees=$${snapshot.unclaimedUsd.toFixed(2)} bonus=$${snapshot.bonusUsd.toFixed(2)} locked=$${snapshot.lockedSolUsd.toFixed(2)}) [raw=${trendData.raw.length} hourly=${trendData.hourly.length} daily=${trendData.daily.length}]`,
@@ -644,8 +559,15 @@ async function collectAssetSnapshot(): Promise<void> {
   }
 }
 
-/** Check if we've crossed an hour/day boundary and aggregate */
-function aggregateTiers(snapshot: AssetSnapshot): void {
+/**
+ * Check if we've crossed an hour/day boundary and aggregate.
+ *
+ * @returns the snapshots promoted into the hourly and daily tiers, so the caller
+ * can persist exactly those — the tiers are appended to in memory here, and each
+ * promotion is one more row rather than a rewrite of the whole tier.
+ */
+function aggregateTiers(snapshot: AssetSnapshot): Array<[Granularity, AssetSnapshot]> {
+  const promoted: Array<[Granularity, AssetSnapshot]> = [];
   const currentHour = floorToHour(snapshot.ts);
   const currentDay = floorToDay(snapshot.ts);
 
@@ -656,7 +578,9 @@ function aggregateTiers(snapshot: AssetSnapshot): void {
     const prevHourStart = lastAggregatedHour;
     const candidates = trendData.raw.filter((s) => s.ts >= prevHourStart && s.ts < prevHourEnd);
     if (candidates.length > 0) {
-      trendData.hourly.push(candidates[candidates.length - 1]);
+      const endOfHour = candidates[candidates.length - 1];
+      trendData.hourly.push(endOfHour);
+      promoted.push(['hourly', endOfHour]);
     }
   }
   lastAggregatedHour = currentHour;
@@ -667,22 +591,26 @@ function aggregateTiers(snapshot: AssetSnapshot): void {
     const prevDayStart = lastAggregatedDay;
     const candidates = trendData.hourly.filter((s) => s.ts >= prevDayStart && s.ts < prevDayEnd);
     if (candidates.length > 0) {
-      trendData.daily.push(candidates[candidates.length - 1]);
+      const endOfDay = candidates[candidates.length - 1];
+      trendData.daily.push(endOfDay);
+      promoted.push(['daily', endOfDay]);
     }
   }
   lastAggregatedDay = currentDay;
+
+  return promoted;
 }
 
-export function startAssetTrendCollector(cacheInvalidator?: CacheInvalidator): void {
+export async function startAssetTrendCollector(cacheInvalidator?: CacheInvalidator): Promise<void> {
   if (!config.jupApiKey) {
     logger.warn(MODULE, 'JUP_API_KEY not set, asset trend disabled');
     return;
   }
   if (cacheInvalidator) cacheInvalidatorRef = cacheInvalidator;
-  loadTrend();
+  await loadTrend();
   logger.info(
     MODULE,
-    `Loaded trend: raw=${trendData.raw.length} hourly=${trendData.hourly.length} daily=${trendData.daily.length}`,
+    `Loaded trend from Postgres: raw=${trendData.raw.length} hourly=${trendData.hourly.length} daily=${trendData.daily.length}`,
   );
 
   // Collect immediately, then start fixed 5-min interval (independent of operations)

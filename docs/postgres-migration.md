@@ -253,6 +253,130 @@ asks "did we already claim this week?") and `ts` on both, for ordering and caps.
 Typing the rest is follow-up work, and JSONB means it can happen per-field
 without a rewrite.
 
+## The write-through pattern
+
+Every store adopts Postgres the same way, and none of them changed what a call
+site sees. The shape is always these three moves:
+
+```ts
+// src/state/pending-swaps-store.ts
+export function addPending(inputMint: string, amount: BN): string {
+  const entry = map.get(inputMint) ?? seed();
+  const total = new BN(entry.pending).add(amount).toString();
+  const updated = { ...entry, pending: total };
+  map.set(inputMint, updated); // 1. memory is authoritative
+  persist(inputMint, updated); // 2. queue the row write
+  return total; // 3. return without awaiting it
+}
+```
+
+**Memory serves every read, synchronously.** The executors call these in the
+middle of building a transaction and the dashboard renders straight out of them,
+so `positionMap.get(nft)`, `getPendingSwap(mint)`, `getAssetTrend()` and the rest
+still return a value rather than a promise. Making them async would have meant
+threading `await` through the close path, which is the part of the bot that is
+racing a target wallet.
+
+**Writes are queued and ordered.** `src/state/write-chain.ts` holds one promise
+tail per store and runs the queued repository calls one at a time, in the order
+the mutations were made. Two edits to the same row therefore reach Postgres in
+the order they happened, and no trading path ever awaits a round trip.
+
+**A failed write is logged, not thrown.** Letting a repository call reject into
+whatever the bot happened to be doing would turn a database hiccup into a failed
+close. The store's next mutation rewrites the same row anyway, so the chain logs
+the failure and drops it. `tests/position-map.test.ts` pins this: a write that
+cannot land leaves the position usable in memory and the caller none the wiser.
+
+**Boot loads before anything can mutate.** `initState()` in `src/index.ts` awaits
+every store's `init()` before the WebSocket monitor starts, so an event can never
+be handled against an empty position map. Each `init()` ends with
+`WriteChain.enable()`, which means a store that was never initialised is a plain
+in-memory structure — that is how the unit tests build one, and why constructing
+a store in a test needs no database.
+
+**Shutdown drains.** SIGINT and SIGTERM await every store's `flush()` before the
+process exits, so the last queued writes land.
+
+The two stores whose `init()` cannot run at that point join later for a reason:
+the asset trend loads inside `startAssetTrendCollector()` because no key means no
+collector at all, and the auth log loads inside `startDashboard()` because no
+password means no dashboard.
+
+### What went away with the files
+
+| Store | What the file version needed and no longer does |
+| --- | --- |
+| `asset-trend.json` | A `.tmp`/`.bak` rotation and corrupt-file recovery, plus hourly and daily dedup passes on every startup |
+| `event-log.json` | A ~336KB rewrite per event |
+| `pending-swaps.json` | Four executors racing on one read-modify-write |
+| `swap-history.json` | Two writers each rewriting the file whole |
+| `position-map.json` | A conversion for values stored as bare NFT strings — now the backfill's job |
+
+## Backfilling an existing `./data` directory
+
+`scripts/migrate-json-to-pg.ts` imports a legacy data directory into a migrated
+database. It is the last thing that reads those files, and it goes through the
+repository layer like everything else — there is no SQL in it.
+
+```bash
+npm run db:start
+npm run migrate
+npm run backfill -- --dry-run             # what the files hold, no connection made
+npm run backfill -- --data-dir ./data     # import (default: ./data)
+```
+
+`DATABASE_URL` has to point at the migrated database for anything but
+`--dry-run`. The run prints one line per store:
+
+```
+  positions       read     2  imported 2  skipped 0
+  events          read     3  imported 3  skipped 0
+  eventPoolMap    read     1  imported 1  skipped 0
+  assetSnapshots  read     4  imported 4  skipped 0
+```
+
+A file that is missing is not an error, and a file that will not parse is a
+warning: the other eleven stores still import, rather than the whole run stopping
+until someone hand-edits JSON.
+
+**Re-running is safe**, by two different mechanisms:
+
+- **Keyed stores** — positions, pending swaps, token PnL, opened referers, pump
+  pending, asset snapshots, the event pool map — upsert on their primary key. A
+  second run rewrites the same rows with the same values and the table does not
+  grow.
+- **Append-only logs** have no natural key, so each record is matched against
+  what the table already holds:
+
+| Store | Identity used to recognise a record already imported |
+| --- | --- |
+| `events` | `(ts, txSig, type)` |
+| `swap_history` | `(ts, txSig, inputMint)` |
+| `auth_log` | `(ts, ip, event)` |
+| `claim_history` | `(ts, week)` |
+| `dac_history` | `(ts, status, swapSig)` |
+
+Each is a millisecond timestamp plus whatever distinguishes two records the bot
+could have written in the same millisecond — a signature, an IP, a status. The
+heuristics are deliberately biased: a false match loses one display-only history
+row, whereas a missed match puts a duplicate in front of the operator on every
+re-run.
+
+**Formats the stores no longer understand.** Three loaders retired with their
+files, and the conversions live in the script now:
+
+- `position-map.json` whose values are bare `ourNft` strings → `{ourNft, createdAt: 0}`,
+  keeping the missing open time rather than inventing `now()` and making every
+  migrated position look freshly opened.
+- `event-log.json` as a bare array, from before it grew a `poolMap`.
+- `asset-trend.json` as a flat array of raw snapshots, with the hourly and daily
+  tiers rebuilt from it by the same last-in-bucket-wins rule the collector
+  aggregates by.
+
+`tests/backfill.test.ts` puts a synthetic data directory holding all of these
+through the script twice and asserts that the row counts do not move.
+
 ## Files that stay on disk
 
 `data/token-names.json` and `data/tvl-cache.json` are **caches**, not state. Both
@@ -300,6 +424,8 @@ constructs a client.
 migrations/0001_initial_schema.sql   node-pg-migrate, up and down
 src/state/db.ts                      lazy pg Pool, transactions, ts conversion
 src/state/repo/                      one module per store, owns all SQL
+src/state/write-chain.ts             ordered, non-blocking, log-never-throw writes
+scripts/migrate-json-to-pg.ts        one-shot import of a legacy ./data directory
 tests/repo/                          integration tests against a real Postgres
 ```
 

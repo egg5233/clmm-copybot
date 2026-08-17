@@ -2,33 +2,24 @@
  * Auto-Claim Copy Bonus (type=2)
  * - 每週二 16:30 台灣時間 setTimeout 觸發
  * - 流程跟 byreal-cli 一致：encode-v2 → sign all → order-v2 → done
- * - 歷史記錄持久化至 ./data/claim-history.json
+ * - 歷史記錄持久化至 Postgres (claim_history，上限 52 筆)
  */
 
-import fs from 'fs';
-import path from 'path';
 import { Connection, VersionedTransaction } from '@solana/web3.js';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { getUserAddress, signVersioned } from '../utils/wallet';
+import { histories } from '../state/repo';
+import type { ClaimHistoryEntry } from '../state/repo/histories';
+import { WriteChain } from '../state/write-chain';
 
 const MODULE = 'AutoClaim';
 const BYREAL_API = 'https://api2.byreal.io/byreal/api/dex/v2';
-const CLAIM_HISTORY_FILE = path.resolve('./data/claim-history.json');
-
-interface ClaimHistoryEntry {
-  ts: number;
-  snapshotTs?: number;
-  week: string;
-  totalPools: number;
-  totalBonusUsd: number;
-  txSignatures: string[];
-  error?: string;
-}
 
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 let lastClaimWeek = '';
 let claimHistory: ClaimHistoryEntry[] = [];
+const writes = new WriteChain(MODULE);
 
 function formatClaimResult(entry: {
   ts: number;
@@ -60,36 +51,28 @@ function getISOWeek(d: Date): string {
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 }
 
-function loadClaimHistory(): void {
-  try {
-    if (fs.existsSync(CLAIM_HISTORY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(CLAIM_HISTORY_FILE, 'utf-8'));
-      if (Array.isArray(data)) {
-        claimHistory = data;
-        for (let i = data.length - 1; i >= 0; i--) {
-          if (!data[i].error) {
-            lastClaimWeek = data[i].week;
-            lastClaimTs = data[i].ts;
-            lastClaimResult = formatClaimResult(data[i]);
-            break;
-          }
-        }
-      }
-    }
-  } catch {
-    /* start fresh */
+/**
+ * Load the claim history from Postgres and recover the scheduler's memory of the
+ * last successful claim, then arm the write-through.
+ */
+async function loadClaimHistory(): Promise<void> {
+  const [entries, lastSuccess] = await Promise.all([
+    histories.listClaims(),
+    histories.latestSuccessfulClaim(),
+  ]);
+  claimHistory = entries;
+  if (lastSuccess) {
+    lastClaimWeek = lastSuccess.week;
+    lastClaimTs = lastSuccess.ts;
+    lastClaimResult = formatClaimResult(lastSuccess);
   }
+  writes.enable();
+  logger.info(MODULE, `Loaded ${claimHistory.length} claim records from Postgres`);
 }
 
-function saveClaimHistory(): void {
-  try {
-    const dir = path.dirname(CLAIM_HISTORY_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    while (claimHistory.length > 52) claimHistory.shift();
-    fs.writeFileSync(CLAIM_HISTORY_FILE, JSON.stringify(claimHistory, null, 2));
-  } catch (err: any) {
-    logger.warn(MODULE, `Could not save claim history: ${err.message}`);
-  }
+/** Resolves once every queued claim write has reached Postgres. For shutdown. */
+export async function flushClaimHistory(): Promise<void> {
+  await writes.drain();
 }
 
 function sleep(ms: number): Promise<void> {
@@ -1050,7 +1033,8 @@ export async function claimLpFeesOffchain(connection: Connection): Promise<LpFee
 
 function finalize(entry: ClaimHistoryEntry, currentWeek: string): void {
   claimHistory.push(entry);
-  saveClaimHistory();
+  while (claimHistory.length > histories.MAX_CLAIM_HISTORY) claimHistory.shift();
+  writes.push('claim history', () => histories.pushClaim(entry));
 
   lastClaimTs = entry.ts;
   lastClaimResult = formatClaimResult(entry);
@@ -1103,8 +1087,8 @@ function scheduleNextClaim(): void {
   }, ms);
 }
 
-export function startAutoClaimScheduler(): void {
-  loadClaimHistory();
+export async function startAutoClaimScheduler(): Promise<void> {
+  await loadClaimHistory();
   if (!config.autoClaimEnabled) {
     logger.info(MODULE, 'Auto-claim disabled (AUTO_CLAIM_ENABLED != true)');
     return;

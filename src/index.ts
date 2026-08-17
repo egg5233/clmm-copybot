@@ -23,8 +23,11 @@ import {
   pushSwap,
 } from './state/activity-log';
 import { flushPendingSwaps, initPendingSwaps } from './state/pending-swaps-store';
-import { startDashboard, refreshSolPrice } from './dashboard/server';
+import { flushTokenPnl, initTokenPnl } from './state/token-pnl-store';
+import { flushOpenedReferers, initOpenedReferers } from './state/opened-referers-store';
+import { flushAuthLog, startDashboard, refreshSolPrice } from './dashboard/server';
 import {
+  flushAssetTrend,
   startAssetTrendCollector,
   stopAssetTrendCollector,
   setSnapshotCallback,
@@ -39,12 +42,16 @@ import {
   setDammV2LpFetcher,
 } from './dashboard/asset-trend';
 import { startPoolTvlCollector, stopPoolTvlCollector } from './monitor/pool-tvl';
-import { startAutoClaimScheduler, stopAutoClaimScheduler } from './executor/auto-claim';
-import { startDacScheduler, stopDacScheduler } from './executor/dac';
+import {
+  flushClaimHistory,
+  startAutoClaimScheduler,
+  stopAutoClaimScheduler,
+} from './executor/auto-claim';
+import { flushDacHistory, startDacScheduler, stopDacScheduler } from './executor/dac';
 import { BotContext, EventLogEntry, SwapHistoryEntry } from './dashboard/context';
 import { OperationQueue } from './executor/queue';
 import { notifyDrawdownPause, notifyCrash, flushAllPending } from './discord/notify';
-import { setPumpPollerWallet } from './state/pump-pending';
+import { flushPumpPending, initPumpPending, setPumpPollerWallet } from './state/pump-pending';
 
 const MODULE = 'Main';
 const LOCK_FILE = path.resolve('./data/bot.lock');
@@ -88,7 +95,14 @@ function releaseLock(): void {
  */
 async function initState(positionMap: PositionMap): Promise<void> {
   requireDatabaseUrl();
-  await Promise.all([positionMap.init(), initActivityLog(), initPendingSwaps()]);
+  await Promise.all([
+    positionMap.init(),
+    initActivityLog(),
+    initPendingSwaps(),
+    initTokenPnl(),
+    initOpenedReferers(),
+    initPumpPending(),
+  ]);
 }
 
 async function main() {
@@ -316,7 +330,7 @@ async function main() {
     swapHistory,
     startedAt: Date.now(),
   };
-  startDashboard(botContext);
+  await startDashboard(botContext);
 
   // Init dynamic rent per position from RPC, then propagate to asset-trend + backfill position map
   byrealExecutor
@@ -385,10 +399,10 @@ async function main() {
       return { lpUsd: d.totalUsd, feeUsd: 0, count: d.positions.length };
     });
   }
-  startAssetTrendCollector(() => byrealExecutor.invalidateAssetCaches());
+  await startAssetTrendCollector(() => byrealExecutor.invalidateAssetCaches());
   startPoolTvlCollector(config.poolTvlRefreshMinutes);
-  startAutoClaimScheduler();
-  startDacScheduler(connection);
+  await startAutoClaimScheduler();
+  await startDacScheduler(connection);
 
   // Pump approval poller (only when discord mode is active)
   if (config.pumpFilterMode === 'discord') {
@@ -515,7 +529,18 @@ async function main() {
     clearInterval(reconcileTimer);
     await monitor.stop();
     // Let the queued state writes reach Postgres before the process goes away.
-    await Promise.all([positionMap.flush(), flushActivityLog(), flushPendingSwaps()]);
+    await Promise.all([
+      positionMap.flush(),
+      flushActivityLog(),
+      flushPendingSwaps(),
+      flushTokenPnl(),
+      flushOpenedReferers(),
+      flushPumpPending(),
+      flushAssetTrend(),
+      flushAuthLog(),
+      flushClaimHistory(),
+      flushDacHistory(),
+    ]);
     await flushAllPending();
     releaseLock();
     process.exit(0);

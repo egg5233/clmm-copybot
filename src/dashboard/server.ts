@@ -43,6 +43,9 @@ import {
   setPumpPollerWallet,
 } from '../state/pump-pending';
 import { pushSwap } from '../state/activity-log';
+import { authLog as authLogRepo } from '../state/repo';
+import type { AuthLogEntry } from '../state/repo/authLog';
+import { WriteChain } from '../state/write-chain';
 import { notifyPumpApproval } from '../discord/notify';
 import {
   getDacHistory,
@@ -173,36 +176,33 @@ export async function refreshSolPrice(): Promise<void> {
   await fetchSolPrice();
 }
 
-// --- Auth Log (disk-persisted, independent from bot logs) ---
-interface AuthLogEntry {
-  ts: number;
-  ip: string;
-  event: string;
-}
-const AUTH_LOG_FILE = './data/auth-log.json';
+// --- Auth Log (Postgres-persisted, independent from bot logs) ---
 const MAX_AUTH_LOG = 200;
-let authLog: AuthLogEntry[] = [];
 
-function loadAuthLog(): void {
-  try {
-    if (fs.existsSync(AUTH_LOG_FILE)) {
-      authLog = JSON.parse(fs.readFileSync(AUTH_LOG_FILE, 'utf-8'));
-    }
-  } catch {
-    authLog = [];
-  }
+/**
+ * Login attempts, newest last — the order the file held and `slice(-20)` reads.
+ * `authLogRepo.list()` hands them back newest first, so the boot load reverses.
+ */
+let authLog: AuthLogEntry[] = [];
+const authLogWrites = new WriteChain(MODULE);
+
+async function initAuthLog(): Promise<void> {
+  const newestFirst = await authLogRepo.list(MAX_AUTH_LOG);
+  authLog = newestFirst.reverse();
+  authLogWrites.enable();
+  logger.info(MODULE, `Loaded ${authLog.length} auth log entries from Postgres`);
+}
+
+/** Resolves once every queued auth-log write has reached Postgres. For shutdown. */
+export async function flushAuthLog(): Promise<void> {
+  await authLogWrites.drain();
 }
 
 function pushAuthLog(ip: string, event: string): void {
-  authLog.push({ ts: Date.now(), ip, event });
+  const ts = Date.now();
+  authLog.push({ ts, ip, event });
   if (authLog.length > MAX_AUTH_LOG) authLog.splice(0, authLog.length - MAX_AUTH_LOG);
-  try {
-    const dir = path.dirname(AUTH_LOG_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(AUTH_LOG_FILE, JSON.stringify(authLog));
-  } catch {
-    /* ignore */
-  }
+  authLogWrites.push('auth log entry', () => authLogRepo.push(ip, event, ts, MAX_AUTH_LOG));
 }
 
 // --- Token Info Cache (disk-persisted, lazy API fetch on unknown mint) ---
@@ -476,14 +476,14 @@ function _broadcastWs(type: string, data: any): void {
   }
 }
 
-export function startDashboard(ctx: BotContext): void {
+export async function startDashboard(ctx: BotContext): Promise<void> {
   if (!config.dashboardPassword) {
     logger.warn(MODULE, 'DASHBOARD_PASSWORD not set, dashboard disabled');
     return;
   }
 
   // Load auth log and coin concentration overrides
-  loadAuthLog();
+  await initAuthLog();
   loadCcOverrides();
 
   // Load token info from disk cache; fetch API only if some tokens are missing logos
@@ -800,11 +800,7 @@ async function handleAPI(
   // DELETE /api/auth-log
   if (method === 'DELETE' && pathname === '/api/auth-log') {
     authLog.length = 0;
-    try {
-      fs.writeFileSync(AUTH_LOG_FILE, '[]');
-    } catch {
-      /* ignore */
-    }
+    authLogWrites.push('auth log reset', () => authLogRepo.clear());
     return json({ ok: true });
   }
 
