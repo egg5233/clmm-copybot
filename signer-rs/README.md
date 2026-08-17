@@ -78,25 +78,25 @@ that adds version-pinning pain with zero benefit.
 
 Preserved verbatim (a drop-in replacement must not silently change policy):
 
-| Behavior | Note |
-| --- | --- |
-| Wire protocol, response shapes, error strings | 4-byte BE length prefix + JSON |
-| Simulation failures are non-fatal | only the CPI-allowlist finding blocks signing |
-| The Jupiter-v6 simulation exemption | preserved policy decision of the existing system |
-| Socket perms 0660, server never closes after a response | client closes |
-| Unlock page, routes, and response bodies | byte-exact, incl. zh-TW text |
+| Behavior                                                | Note                                             |
+| ------------------------------------------------------- | ------------------------------------------------ |
+| Wire protocol, response shapes, error strings           | 4-byte BE length prefix + JSON                   |
+| Simulation failures are non-fatal                       | only the CPI-allowlist finding blocks signing    |
+| The Jupiter-v6 simulation exemption                     | preserved policy decision of the existing system |
+| Socket perms 0660, server never closes after a response | client closes                                    |
+| Unlock page, routes, and response bodies                | byte-exact, incl. zh-TW text                     |
 
 Deliberately changed (each was a real gap in the TS implementation):
 
-| Change | Why |
-| --- | --- |
-| 64 KiB max frame length, reject + close | TS read an unbounded `Buffer.concat` — OOM vector |
-| `while`-loop frame parsing | TS used `if` — pipelined frames stalled |
-| SPL `Approve` enforced (whitelisted delegate or DEX tx) | TS logged a warning but signed anyway |
-| Key material zeroized (`secrecy`/`zeroize`) | TS kept the key in a module-level string |
-| Exponential backoff on failed unlock attempts | TS had no rate limit on `POST /unlock` |
-| `versioned` request carrying legacy bytes is rejected | web3.js silently fell back to the legacy decoder |
-| Opt-in `SO_PEERCRED` same-UID check (`SIGNER_REQUIRE_PEER_UID`) | socket was guarded by file perms only |
+| Change                                                          | Why                                               |
+| --------------------------------------------------------------- | ------------------------------------------------- |
+| 64 KiB max frame length, reject + close                         | TS read an unbounded `Buffer.concat` — OOM vector |
+| `while`-loop frame parsing                                      | TS used `if` — pipelined frames stalled           |
+| SPL `Approve` enforced (whitelisted delegate or DEX tx)         | TS logged a warning but signed anyway             |
+| Key material zeroized (`secrecy`/`zeroize`)                     | TS kept the key in a module-level string          |
+| Exponential backoff on failed unlock attempts                   | TS had no rate limit on `POST /unlock`            |
+| `versioned` request carrying legacy bytes is rejected           | web3.js silently fell back to the legacy decoder  |
+| Opt-in `SO_PEERCRED` same-UID check (`SIGNER_REQUIRE_PEER_UID`) | socket was guarded by file perms only             |
 
 ## Threat model
 
