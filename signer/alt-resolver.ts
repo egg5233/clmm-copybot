@@ -1,4 +1,9 @@
-import { Connection, PublicKey, AddressLookupTableAccount, VersionedTransaction } from '@solana/web3.js';
+import {
+  Connection,
+  PublicKey,
+  AddressLookupTableAccount,
+  VersionedTransaction,
+} from '@solana/web3.js';
 
 /**
  * Resolve Address Lookup Tables in a VersionedTransaction.
@@ -17,7 +22,7 @@ export async function resolveALTs(
   }
 
   // Fetch all ALT accounts
-  const altKeys = lookups.map(l => l.accountKey);
+  const altKeys = lookups.map((l) => l.accountKey);
   const altAccounts = await connection.getMultipleAccountsInfo(altKeys);
 
   const resolvedLookupTables: AddressLookupTableAccount[] = [];
@@ -50,10 +55,7 @@ export async function resolveALTs(
  * Extract program IDs from a transaction's instructions.
  * Must be called AFTER ALT resolution to get correct program IDs for v0 TXs.
  */
-export function extractProgramIds(
-  allKeys: PublicKey[],
-  tx: VersionedTransaction,
-): PublicKey[] {
+export function extractProgramIds(allKeys: PublicKey[], tx: VersionedTransaction): PublicKey[] {
   const message = tx.message;
   const programIds = new Set<string>();
 
@@ -62,5 +64,5 @@ export function extractProgramIds(
     if (programId) programIds.add(programId.toBase58());
   }
 
-  return Array.from(programIds).map(id => new PublicKey(id));
+  return Array.from(programIds).map((id) => new PublicKey(id));
 }

@@ -10,7 +10,9 @@ function resolveSymbol(mint: string): string {
     const raw = fs.readFileSync('./data/token-names.json', 'utf-8');
     const cache = JSON.parse(raw);
     return cache[mint]?.symbol || mint;
-  } catch { return mint; }
+  } catch {
+    return mint;
+  }
 }
 
 const MODULE = 'Discord';
@@ -38,11 +40,19 @@ function parseOnChainError(error: any): string {
   } else if (raw instanceof Error) {
     msg = raw.message;
   } else {
-    try { msg = JSON.stringify(raw) ?? String(raw); } catch { msg = String(raw); }
+    try {
+      msg = JSON.stringify(raw) ?? String(raw);
+    } catch {
+      msg = String(raw);
+    }
   }
   // Guard against [object Object] leaking through
   if (msg.includes('[object Object]')) {
-    try { msg = JSON.stringify(error); } catch { msg = String(error); }
+    try {
+      msg = JSON.stringify(error);
+    } catch {
+      msg = String(error);
+    }
   }
 
   // Extract AnchorError: "Error Code: PriceSlippageCheck. Error Number: 6021."
@@ -126,7 +136,8 @@ async function postNotification(
 
   const ts = eventTime || new Date();
   const utcStr = ts.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-  const twTime = ts.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }) + ' (UTC+8)';
+  const twTime =
+    ts.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false }) + ' (UTC+8)';
   const allFields = [
     ...(fields && fields.length > 0 ? fields : []),
     { name: '時間', value: `${twTime}\n${utcStr}` },
@@ -191,9 +202,8 @@ function sendAggregated(
     eventTime: new Date(),
     timer: setTimeout(() => {
       pendingMap.delete(key);
-      const desc = pending.count > 1
-        ? `${pending.description} (x${pending.count})`
-        : pending.description;
+      const desc =
+        pending.count > 1 ? `${pending.description} (x${pending.count})` : pending.description;
       postNotification(pending.type, pending.title, desc, pending.fields, pending.eventTime);
     }, AGGREGATE_WINDOW_MS),
   };
@@ -214,7 +224,11 @@ export function notifySolInsufficient(solBalance: number): void {
   );
 }
 
-export function notifyDrawdownPause(drawdownPct: number, startAsset: number, currentAsset: number): void {
+export function notifyDrawdownPause(
+  drawdownPct: number,
+  startAsset: number,
+  currentAsset: number,
+): void {
   sendAggregated(
     'drawdown_pause',
     '回撤暫停',
@@ -276,7 +290,11 @@ export function notifyCloseFailed(ourNft: string, error: any, attempt: number): 
  * Pump token approval request — sends immediately (no aggregation).
  * Payload includes pumpMint so the Worker can generate approve/reject buttons.
  */
-export async function notifyPumpApproval(mint: string, symbol: string, pool: string): Promise<void> {
+export async function notifyPumpApproval(
+  mint: string,
+  symbol: string,
+  pool: string,
+): Promise<void> {
   const url = (config as any).discordNotifyUrl;
   const apiKey = (config as any).discordApiKey;
   if (!url) return;
@@ -289,10 +307,12 @@ export async function notifyPumpApproval(mint: string, symbol: string, pool: str
       if ((config as any).jupApiKey) headers['x-api-key'] = (config as any).jupApiKey;
       const jupRes = await fetch(`https://api.jup.ag/tokens/v2/search?query=${mint}`, { headers });
       if (jupRes.ok) {
-        const arr: any[] = await jupRes.json() as any;
+        const arr: any[] = (await jupRes.json()) as any;
         if (arr?.[0]?.symbol) resolvedSymbol = arr[0].symbol;
       }
-    } catch { /* use original symbol */ }
+    } catch {
+      /* use original symbol */
+    }
   }
 
   const payload = {
@@ -368,12 +388,9 @@ export async function notifyPumpExpired(mint: string, symbol: string): Promise<v
 export async function notifyCrash(error: any): Promise<void> {
   const errMsg = error?.stack ?? error?.message ?? String(error);
   // Bypass aggregation — send immediately since bot is crashing
-  await postNotification(
-    'crash',
-    'Bot 崩潰',
-    `Bot 發生未預期錯誤並即將重啟:\n${errMsg}`,
-    [{ name: '錯誤', value: errMsg.slice(0, 1000) }],
-  );
+  await postNotification('crash', 'Bot 崩潰', `Bot 發生未預期錯誤並即將重啟:\n${errMsg}`, [
+    { name: '錯誤', value: errMsg.slice(0, 1000) },
+  ]);
 }
 
 /**
@@ -386,10 +403,11 @@ export async function flushAllPending(): Promise<void> {
   for (const [key, pending] of pendingMap) {
     clearTimeout(pending.timer);
     pendingMap.delete(key);
-    const desc = pending.count > 1
-      ? `${pending.description} (x${pending.count})`
-      : pending.description;
-    promises.push(postNotification(pending.type, pending.title, desc, pending.fields, pending.eventTime));
+    const desc =
+      pending.count > 1 ? `${pending.description} (x${pending.count})` : pending.description;
+    promises.push(
+      postNotification(pending.type, pending.title, desc, pending.fields, pending.eventTime),
+    );
   }
 
   await Promise.allSettled(promises);

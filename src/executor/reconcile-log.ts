@@ -1,9 +1,4 @@
-export type ReconcileScanStatus =
-  | 'checking'
-  | 'active'
-  | 'orphan'
-  | 'skipped'
-  | 'transient-error';
+export type ReconcileScanStatus = 'checking' | 'active' | 'orphan' | 'skipped' | 'transient-error';
 
 export interface ReconcileScanLogInput {
   scanned: number;

@@ -1,4 +1,9 @@
-import { Connection, ParsedTransactionWithMeta, PartiallyDecodedInstruction, PublicKey } from '@solana/web3.js';
+import {
+  Connection,
+  ParsedTransactionWithMeta,
+  PartiallyDecodedInstruction,
+  PublicKey,
+} from '@solana/web3.js';
 import bs58 from 'bs58';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -10,13 +15,13 @@ const MODULE = 'Parser';
 const ORCA_IX_DISC: Record<string, string> = {
   '2e9cf3760dcdfbb2': 'increase_liquidity',
   '851d59df45eeb00a': 'increase_liquidity_v2',
-  'a026d06f685b2c01': 'decrease_liquidity',
+  a026d06f685b2c01: 'decrease_liquidity',
   '3a7fbc3e4f52c460': 'decrease_liquidity_v2',
-  'a498cf631eba13b6': 'collect_fees',
-  'cf755fbfe5b4e20f': 'collect_fees_v2',
+  a498cf631eba13b6: 'collect_fees',
+  cf755fbfe5b4e20f: 'collect_fees_v2',
   '87802f4d0f98f031': 'open_position',
-  'f21d86303a6e0e3c': 'open_position_with_metadata',
-  'd42f5f5c726683fa': 'open_position_with_token_extensions',
+  f21d86303a6e0e3c: 'open_position_with_metadata',
+  d42f5f5c726683fa: 'open_position_with_token_extensions',
   '7b86510031446262': 'close_position',
 };
 
@@ -26,47 +31,47 @@ const DAMMV2_PROGRAM_ID = 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG';
 // Meteora DAMM v2 instruction discriminators (Anchor sha256("global:<name>")[:8])
 const DAMMV2_IX_DISC: Record<string, string> = {
   '30d7c59960cbb485': 'create_position',
-  'b59d59438fb63448': 'add_liquidity',
+  b59d59438fb63448: 'add_liquidity',
   '5055d14818ceb16c': 'remove_liquidity',
   '0a333d2370691855': 'remove_all_liquidity',
   '7b86510031446262': 'close_position',
-  'b4269a118521a2d3': 'claim_position_fee',
+  b4269a118521a2d3: 'claim_position_fee',
   '955fb5f25e5a9ea2': 'claim_reward',
 };
 
 // Meteora DLMM instruction discriminators (Anchor sha256("global:<name>")[:8])
 const METEORA_IX_DISC: Record<string, string> = {
   // Open Position (4)
-  'dbc0ea47bebf6650': 'initialize_position',
+  dbc0ea47bebf6650: 'initialize_position',
   '8f13f291d50f6873': 'initialize_position2',
   '2e527d92558de499': 'initialize_position_pda',
-  'fbbdbef475fe2394': 'initialize_position_by_operator',
+  fbbdbef475fe2394: 'initialize_position_by_operator',
 
   // Close Position (3)
-  '7b86510031446262': 'close_position',     // Same discriminator as Orca — differentiated by program ID
-  'ae5a2373ba2893e2': 'close_position2',
+  '7b86510031446262': 'close_position', // Same discriminator as Orca — differentiated by program ID
+  ae5a2373ba2893e2: 'close_position2',
   '3b7cd4765b986e9d': 'close_position_if_empty',
 
   // Add Liquidity (9)
-  'b59d59438fb63448': 'add_liquidity',
-  'e4a24e1c46db7473': 'add_liquidity2',
+  b59d59438fb63448: 'add_liquidity',
+  e4a24e1c46db7473: 'add_liquidity2',
   '0703967f94283dc8': 'add_liquidity_by_strategy',
   '03dd95da6f8d76d5': 'add_liquidity_by_strategy2',
   '2905eeaf64e106cd': 'add_liquidity_by_strategy_one_side',
   '1c8cee63e7a21595': 'add_liquidity_by_weight',
   '5e9b6797465fdca5': 'add_liquidity_one_side',
-  'a1c26754ab47fa9a': 'add_liquidity_one_side_precise',
+  a1c26754ab47fa9a: 'add_liquidity_one_side_precise',
   '2133a3c975627de7': 'add_liquidity_one_side_precise2',
 
   // Remove Liquidity (5)
   '5055d14818ceb16c': 'remove_liquidity',
-  'e6d7527ff165e392': 'remove_liquidity2',
+  e6d7527ff165e392: 'remove_liquidity2',
   '1a526698f04a691a': 'remove_liquidity_by_range',
-  'cc02c391359191cd': 'remove_liquidity_by_range2',
+  cc02c391359191cd: 'remove_liquidity_by_range2',
   '0a333d2370691855': 'remove_all_liquidity',
 
   // Claim Fees (2)
-  'a9204f8988e84689': 'claim_fee',
+  a9204f8988e84689: 'claim_fee',
   '70bf65ab1c907fbb': 'claim_fee2',
 
   // Rebalance (Phase 2 — log only, not handled)
@@ -79,31 +84,98 @@ function getIxDiscriminator(data: string): string {
     const bytes = bs58.decode(data);
     if (bytes.length < 8) return '';
     return Buffer.from(bytes.slice(0, 8)).toString('hex');
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 }
 
 export type ParsedEvent =
-  | { type: 'JUPITER_SWAP'; inputMint: string; outputMint: string; inputAmount: string; outputAmount: string; inputDecimals: number; outputDecimals: number; inputAmountRaw: string; inputPreBalanceRaw: string }
-  | { type: 'BYREAL_OPEN_POSITION'; poolId: string; tickLower: number; tickUpper: number; liquidity: string; refererPosition: string | null; tokenAmountA: string; tokenAmountB: string; positionNftMint: string; poolMints?: string }
+  | {
+      type: 'JUPITER_SWAP';
+      inputMint: string;
+      outputMint: string;
+      inputAmount: string;
+      outputAmount: string;
+      inputDecimals: number;
+      outputDecimals: number;
+      inputAmountRaw: string;
+      inputPreBalanceRaw: string;
+    }
+  | {
+      type: 'BYREAL_OPEN_POSITION';
+      poolId: string;
+      tickLower: number;
+      tickUpper: number;
+      liquidity: string;
+      refererPosition: string | null;
+      tokenAmountA: string;
+      tokenAmountB: string;
+      positionNftMint: string;
+      poolMints?: string;
+    }
   | { type: 'BYREAL_INCREASE_LIQUIDITY'; positionNftMint: string }
   | { type: 'BYREAL_DECREASE_LIQUIDITY'; positionNftMint: string; liquidity: string }
-  | { type: 'BYREAL_CLOSE_POSITION'; positionNftMint: string; receivedTokens: { mint: string; amount: string }[] }
+  | {
+      type: 'BYREAL_CLOSE_POSITION';
+      positionNftMint: string;
+      receivedTokens: { mint: string; amount: string }[];
+    }
   | { type: 'BYREAL_COLLECT_FEES'; positionNftMint: string }
-  | { type: 'ORCA_OPEN_POSITION'; poolAddress: string; tickLower: number; tickUpper: number; positionNftMint: string; poolMints?: string }
-  | { type: 'ORCA_CLOSE_POSITION'; positionNftMint: string; receivedTokens: { mint: string; amount: string }[] }
+  | {
+      type: 'ORCA_OPEN_POSITION';
+      poolAddress: string;
+      tickLower: number;
+      tickUpper: number;
+      positionNftMint: string;
+      poolMints?: string;
+    }
+  | {
+      type: 'ORCA_CLOSE_POSITION';
+      positionNftMint: string;
+      receivedTokens: { mint: string; amount: string }[];
+    }
   | { type: 'ORCA_INCREASE_LIQUIDITY'; positionNftMint: string }
   | { type: 'ORCA_DECREASE_LIQUIDITY'; positionNftMint: string }
-  | { type: 'METEORA_OPEN_POSITION'; poolAddress: string; lowerBinId: number; width: number; positionAddress: string }
-  | { type: 'METEORA_CLOSE_POSITION'; positionAddress: string; receivedTokens: { mint: string; amount: string }[] }
+  | {
+      type: 'METEORA_OPEN_POSITION';
+      poolAddress: string;
+      lowerBinId: number;
+      width: number;
+      positionAddress: string;
+    }
+  | {
+      type: 'METEORA_CLOSE_POSITION';
+      positionAddress: string;
+      receivedTokens: { mint: string; amount: string }[];
+    }
   | { type: 'METEORA_ADD_LIQUIDITY'; positionAddress: string }
   | { type: 'METEORA_REMOVE_LIQUIDITY'; positionAddress: string }
-  | { type: 'PCS_OPEN_POSITION'; poolId: string; tickLower: number; tickUpper: number; liquidity: string; refererPosition: string | null; tokenAmountA: string; tokenAmountB: string; positionNftMint: string; poolMints?: string }
+  | {
+      type: 'PCS_OPEN_POSITION';
+      poolId: string;
+      tickLower: number;
+      tickUpper: number;
+      liquidity: string;
+      refererPosition: string | null;
+      tokenAmountA: string;
+      tokenAmountB: string;
+      positionNftMint: string;
+      poolMints?: string;
+    }
   | { type: 'PCS_INCREASE_LIQUIDITY'; positionNftMint: string }
   | { type: 'PCS_DECREASE_LIQUIDITY'; positionNftMint: string; liquidity: string }
-  | { type: 'PCS_CLOSE_POSITION'; positionNftMint: string; receivedTokens: { mint: string; amount: string }[] }
+  | {
+      type: 'PCS_CLOSE_POSITION';
+      positionNftMint: string;
+      receivedTokens: { mint: string; amount: string }[];
+    }
   | { type: 'PCS_COLLECT_FEES'; positionNftMint: string }
   | { type: 'DAMMV2_OPEN_POSITION'; poolAddress: string; positionNftMint: string }
-  | { type: 'DAMMV2_CLOSE_POSITION'; positionNftMint: string; receivedTokens: { mint: string; amount: string }[] }
+  | {
+      type: 'DAMMV2_CLOSE_POSITION';
+      positionNftMint: string;
+      receivedTokens: { mint: string; amount: string }[];
+    }
   | { type: 'DAMMV2_ADD_LIQUIDITY'; positionNftMint: string }
   | { type: 'DAMMV2_REMOVE_LIQUIDITY'; positionNftMint: string }
   | { type: 'DAMMV2_CLAIM_FEE'; positionNftMint: string }
@@ -121,21 +193,27 @@ export async function parseTransaction(
   const events: ParsedEvent[] = [];
 
   // Quick check from logs: does this TX involve Byreal, Orca, or Meteora?
-  const involvesByreal = logs.some(l => l.includes(config.byrealProgramId.toBase58()));
-  const involvesOrca = logs.some(l => l.includes(config.orcaProgramId.toBase58()));
-  const involvesMeteora = logs.some(l => l.includes(config.meteoraProgramId.toBase58()));
-  const involvesPcs = config.pcsEnabled && logs.some(l => l.includes(config.pcsProgramId.toBase58()));
-  const involvesDammv2 = logs.some(l => l.includes(DAMMV2_PROGRAM_ID));
-  const involvesMemo = logs.some(l => l.includes(config.memoProgramId.toBase58()));
+  const involvesByreal = logs.some((l) => l.includes(config.byrealProgramId.toBase58()));
+  const involvesOrca = logs.some((l) => l.includes(config.orcaProgramId.toBase58()));
+  const involvesMeteora = logs.some((l) => l.includes(config.meteoraProgramId.toBase58()));
+  const involvesPcs =
+    config.pcsEnabled && logs.some((l) => l.includes(config.pcsProgramId.toBase58()));
+  const involvesDammv2 = logs.some((l) => l.includes(DAMMV2_PROGRAM_ID));
+  const involvesMemo = logs.some((l) => l.includes(config.memoProgramId.toBase58()));
 
   // Spam filter: mass SOL-transfer TXs show many "Program 11111111111111111111111111111111 success" lines.
   // Skip early — no need to fetch the full TX.
   if (!involvesByreal && !involvesOrca && !involvesMeteora && !involvesPcs && !involvesDammv2) {
     const SYSTEM_PROGRAM_SUCCESS = 'Program 11111111111111111111111111111111 success';
-    const systemSuccessCount = logs.filter(l => l === SYSTEM_PROGRAM_SUCCESS).length;
-    const hasComputeBudget = logs.some(l => l.includes('Program ComputeBudget111111111111111111111111111111 invoke'));
+    const systemSuccessCount = logs.filter((l) => l === SYSTEM_PROGRAM_SUCCESS).length;
+    const hasComputeBudget = logs.some((l) =>
+      l.includes('Program ComputeBudget111111111111111111111111111111 invoke'),
+    );
     if (systemSuccessCount >= 5 && !hasComputeBudget) {
-      logger.debug(MODULE, `Spam TX skipped (${systemSuccessCount}x system-program, no compute budget): ${signature.slice(0, 8)}`);
+      logger.debug(
+        MODULE,
+        `Spam TX skipped (${systemSuccessCount}x system-program, no compute budget): ${signature.slice(0, 8)}`,
+      );
       return [{ type: 'UNKNOWN' }];
     }
   }
@@ -150,9 +228,9 @@ export async function parseTransaction(
       });
       if (tx) break;
       // TX not propagated yet, wait before retry
-      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
     } catch {
-      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
     }
   }
 
@@ -212,13 +290,20 @@ export async function parseTransaction(
 /**
  * Parse Jupiter swap by analyzing pre/post token balances.
  */
-function parseJupiterSwap(tx: ParsedTransactionWithMeta, logs: string[], targetWallet: PublicKey): ParsedEvent | null {
+function parseJupiterSwap(
+  tx: ParsedTransactionWithMeta,
+  logs: string[],
+  targetWallet: PublicKey,
+): ParsedEvent | null {
   const preBalances = tx.meta?.preTokenBalances || [];
   const postBalances = tx.meta?.postTokenBalances || [];
   const targetStr = targetWallet.toBase58();
 
   // Find token balances that changed for target
-  const changes: Map<string, { pre: number; post: number; decimals: number; preRaw: string; postRaw: string }> = new Map();
+  const changes: Map<
+    string,
+    { pre: number; post: number; decimals: number; preRaw: string; postRaw: string }
+  > = new Map();
 
   for (const bal of preBalances) {
     if (bal.owner === targetStr && bal.mint) {
@@ -234,7 +319,13 @@ function parseJupiterSwap(tx: ParsedTransactionWithMeta, logs: string[], targetW
 
   for (const bal of postBalances) {
     if (bal.owner === targetStr && bal.mint) {
-      const existing = changes.get(bal.mint) || { pre: 0, post: 0, decimals: bal.uiTokenAmount.decimals, preRaw: '0', postRaw: '0' };
+      const existing = changes.get(bal.mint) || {
+        pre: 0,
+        post: 0,
+        decimals: bal.uiTokenAmount.decimals,
+        preRaw: '0',
+        postRaw: '0',
+      };
       existing.post = parseFloat(bal.uiTokenAmount.uiAmountString || '0');
       existing.postRaw = bal.uiTokenAmount.amount;
       changes.set(bal.mint, existing);
@@ -273,7 +364,7 @@ function parseJupiterSwap(tx: ParsedTransactionWithMeta, logs: string[], targetW
   const solPost = tx.meta?.postBalances;
   const txFee = (tx.meta?.fee || 5000) / 1e9;
   const targetIdx = tx.transaction.message.accountKeys.findIndex(
-    k => k.pubkey.toBase58() === targetStr
+    (k) => k.pubkey.toBase58() === targetStr,
   );
   if (solPre && solPost && targetIdx >= 0) {
     const solDiff = (solPost[targetIdx] - solPre[targetIdx]) / 1e9;
@@ -298,7 +389,8 @@ function parseJupiterSwap(tx: ParsedTransactionWithMeta, logs: string[], targetW
     // Safety: filter out NFT transfers (decimals=0 + amount ≤ 1 = NFT, not fungible token)
     const inputAmt = parseFloat(inputAmount);
     const outputAmt = parseFloat(outputAmount);
-    if ((inputDecimals === 0 && inputAmt <= 1) || (outputDecimals === 0 && outputAmt <= 1)) return null;
+    if ((inputDecimals === 0 && inputAmt <= 1) || (outputDecimals === 0 && outputAmt <= 1))
+      return null;
 
     return {
       type: 'JUPITER_SWAP',
@@ -331,26 +423,25 @@ function parseByrealOperations(
   // Anchor programs emit: "Program log: Instruction: <PascalCaseName>"
   // IDL has: OpenPosition (legacy), OpenPositionV2 (deprecated), OpenPositionWithToken22Nft (current)
   // Note: "OpenPosition" substring also matches V2 and Token22Nft variants
-  const hasOpenPosition = logs.some(l =>
-    l.includes('Instruction: OpenPosition') ||
-    l.includes('Instruction: OpenPositionV2') ||
-    l.includes('Instruction: OpenPositionWithToken22Nft')
+  const hasOpenPosition = logs.some(
+    (l) =>
+      l.includes('Instruction: OpenPosition') ||
+      l.includes('Instruction: OpenPositionV2') ||
+      l.includes('Instruction: OpenPositionWithToken22Nft'),
   );
   // Detect Token22 variant specifically (different account layout)
-  const isToken22Position = logs.some(l =>
-    l.includes('Instruction: OpenPositionWithToken22Nft')
+  const isToken22Position = logs.some((l) => l.includes('Instruction: OpenPositionWithToken22Nft'));
+  const hasDecreaseLiquidity = logs.some(
+    (l) =>
+      l.includes('Instruction: DecreaseLiquidity') ||
+      l.includes('Instruction: DecreaseLiquidityV2'),
   );
-  const hasDecreaseLiquidity = logs.some(l =>
-    l.includes('Instruction: DecreaseLiquidity') ||
-    l.includes('Instruction: DecreaseLiquidityV2')
+  const hasIncreaseLiquidity = logs.some(
+    (l) =>
+      l.includes('Instruction: IncreaseLiquidity') ||
+      l.includes('Instruction: IncreaseLiquidityV2'),
   );
-  const hasIncreaseLiquidity = logs.some(l =>
-    l.includes('Instruction: IncreaseLiquidity') ||
-    l.includes('Instruction: IncreaseLiquidityV2')
-  );
-  const hasClosePosition = logs.some(l =>
-    l.includes('Instruction: ClosePosition')
-  );
+  const hasClosePosition = logs.some((l) => l.includes('Instruction: ClosePosition'));
   // Note: collectFees in SDK = DecreaseLiquidity with 0 amount.
   // We don't need to mirror it — our own fee collector handles this on schedule.
 
@@ -401,7 +492,7 @@ function findAllByrealInstructions(tx: ParsedTransactionWithMeta): PartiallyDeco
   }
 
   // Also check inner instructions
-  for (const inner of (tx.meta?.innerInstructions || [])) {
+  for (const inner of tx.meta?.innerInstructions || []) {
     for (const ix of inner.instructions) {
       if ('programId' in ix && ix.programId.toBase58() === byrealStr) {
         results.push(ix as PartiallyDecodedInstruction);
@@ -430,7 +521,7 @@ function findNewNftMintsFromTx(tx: ParsedTransactionWithMeta, targetWallet: Publ
     if (post.uiTokenAmount.decimals === 0 && post.uiTokenAmount.uiAmount === 1) {
       // Check it didn't exist in pre-balances (newly minted)
       const existed = preBalances.some(
-        pre => pre.accountIndex === post.accountIndex && pre.mint === post.mint
+        (pre) => pre.accountIndex === post.accountIndex && pre.mint === post.mint,
       );
       if (!existed) {
         nftMints.push(post.mint);
@@ -445,7 +536,10 @@ function findNewNftMintsFromTx(tx: ParsedTransactionWithMeta, targetWallet: Publ
  * Find NFT mints that were burned/closed in this TX.
  * These appear in preTokenBalances but not in postTokenBalances (or amount goes to 0).
  */
-function findClosedNftMintsFromTx(tx: ParsedTransactionWithMeta, targetWallet: PublicKey): string[] {
+function findClosedNftMintsFromTx(
+  tx: ParsedTransactionWithMeta,
+  targetWallet: PublicKey,
+): string[] {
   const preBalances = tx.meta?.preTokenBalances || [];
   const postBalances = tx.meta?.postTokenBalances || [];
   const targetStr = targetWallet.toBase58();
@@ -458,7 +552,7 @@ function findClosedNftMintsFromTx(tx: ParsedTransactionWithMeta, targetWallet: P
     if (pre.uiTokenAmount.decimals === 0 && pre.uiTokenAmount.uiAmount === 1) {
       // Check if it's gone or zeroed in post
       const post = postBalances.find(
-        p => p.accountIndex === pre.accountIndex && p.mint === pre.mint
+        (p) => p.accountIndex === pre.accountIndex && p.mint === pre.mint,
       );
       if (!post || post.uiTokenAmount.uiAmount === 0) {
         closedMints.push(pre.mint);
@@ -543,7 +637,10 @@ function parseOpenPositions(
  * Parse IncreaseLiquidity events.
  * Detect which existing position NFT was targeted by checking target's held NFTs.
  */
-function parseIncreaseLiquidity(tx: ParsedTransactionWithMeta, targetWallet: PublicKey): ParsedEvent[] {
+function parseIncreaseLiquidity(
+  tx: ParsedTransactionWithMeta,
+  targetWallet: PublicKey,
+): ParsedEvent[] {
   const preBalances = tx.meta?.preTokenBalances || [];
   const targetStr = targetWallet.toBase58();
   const events: ParsedEvent[] = [];
@@ -664,7 +761,7 @@ function findAllOrcaInstructions(tx: ParsedTransactionWithMeta): PartiallyDecode
     }
   }
 
-  for (const inner of (tx.meta?.innerInstructions || [])) {
+  for (const inner of tx.meta?.innerInstructions || []) {
     for (const ix of inner.instructions) {
       if ('programId' in ix && ix.programId.toBase58() === orcaStr) {
         results.push(ix as PartiallyDecodedInstruction);
@@ -723,7 +820,13 @@ function parseOrcaOperations(
   }
 
   // collectFees alone (no decrease/close) — treat as decrease for fee collection
-  if (hasCollectFees && !hasDecreaseLiquidity && !hasClosePosition && !hasOpenPosition && !hasIncreaseLiquidity) {
+  if (
+    hasCollectFees &&
+    !hasDecreaseLiquidity &&
+    !hasClosePosition &&
+    !hasOpenPosition &&
+    !hasIncreaseLiquidity
+  ) {
     const feeEvents = parseOrcaDecreaseOrClose(tx, false, targetWallet);
     events.push(...feeEvents);
   }
@@ -784,7 +887,10 @@ function parseOrcaOpenPositions(
 /**
  * Parse Orca IncreaseLiquidity events.
  */
-function parseOrcaIncreaseLiquidity(tx: ParsedTransactionWithMeta, targetWallet: PublicKey): ParsedEvent[] {
+function parseOrcaIncreaseLiquidity(
+  tx: ParsedTransactionWithMeta,
+  targetWallet: PublicKey,
+): ParsedEvent[] {
   const preBalances = tx.meta?.preTokenBalances || [];
   const targetStr = targetWallet.toBase58();
   const events: ParsedEvent[] = [];
@@ -857,7 +963,7 @@ function findAllMeteoraInstructions(tx: ParsedTransactionWithMeta): PartiallyDec
     }
   }
 
-  for (const inner of (tx.meta?.innerInstructions || [])) {
+  for (const inner of tx.meta?.innerInstructions || []) {
     for (const ix of inner.instructions) {
       if ('programId' in ix && ix.programId.toBase58() === meteoraStr) {
         results.push(ix as PartiallyDecodedInstruction);
@@ -895,7 +1001,8 @@ function parseMeteoraOperations(
     if (name.startsWith('initialize_position')) hasInitPosition = true;
     else if (name.startsWith('close_position')) hasClosePosition = true;
     else if (name.startsWith('add_liquidity')) hasAddLiquidity = true;
-    else if (name.startsWith('remove_liquidity') || name === 'remove_all_liquidity') hasRemoveLiquidity = true;
+    else if (name.startsWith('remove_liquidity') || name === 'remove_all_liquidity')
+      hasRemoveLiquidity = true;
     else if (name.startsWith('claim_fee')) hasClaimFee = true;
     else if (name === 'rebalance_liquidity') hasRebalance = true;
   }
@@ -915,7 +1022,13 @@ function parseMeteoraOperations(
   }
 
   // claimFee alone (no remove/close) -> treat as remove event (same as Orca collect_fees logic)
-  if (hasClaimFee && !hasRemoveLiquidity && !hasClosePosition && !hasInitPosition && !hasAddLiquidity) {
+  if (
+    hasClaimFee &&
+    !hasRemoveLiquidity &&
+    !hasClosePosition &&
+    !hasInitPosition &&
+    !hasAddLiquidity
+  ) {
     events.push(...parseMeteoraRemoveOrClose(tx, meteoraIxs, false, targetWallet));
   }
 
@@ -983,7 +1096,9 @@ function parseMeteoraOpenPositions(
         lowerBinId = buf.readInt32LE(8);
         width = buf.readInt32LE(12);
       }
-    } catch { /* use defaults */ }
+    } catch {
+      /* use defaults */
+    }
 
     events.push({
       type: 'METEORA_OPEN_POSITION',
@@ -1153,7 +1268,7 @@ function findAllPcsInstructions(tx: ParsedTransactionWithMeta): PartiallyDecoded
     }
   }
 
-  for (const inner of (tx.meta?.innerInstructions || [])) {
+  for (const inner of tx.meta?.innerInstructions || []) {
     for (const ix of inner.instructions) {
       if ('programId' in ix && ix.programId.toBase58() === pcsStr) {
         results.push(ix as PartiallyDecodedInstruction);
@@ -1176,25 +1291,24 @@ function parsePcsOperations(
 ): ParsedEvent[] {
   const events: ParsedEvent[] = [];
 
-  const hasOpenPosition = logs.some(l =>
-    l.includes('Instruction: OpenPosition') ||
-    l.includes('Instruction: OpenPositionV2') ||
-    l.includes('Instruction: OpenPositionWithToken22Nft')
+  const hasOpenPosition = logs.some(
+    (l) =>
+      l.includes('Instruction: OpenPosition') ||
+      l.includes('Instruction: OpenPositionV2') ||
+      l.includes('Instruction: OpenPositionWithToken22Nft'),
   );
-  const isToken22Position = logs.some(l =>
-    l.includes('Instruction: OpenPositionWithToken22Nft')
+  const isToken22Position = logs.some((l) => l.includes('Instruction: OpenPositionWithToken22Nft'));
+  const hasDecreaseLiquidity = logs.some(
+    (l) =>
+      l.includes('Instruction: DecreaseLiquidity') ||
+      l.includes('Instruction: DecreaseLiquidityV2'),
   );
-  const hasDecreaseLiquidity = logs.some(l =>
-    l.includes('Instruction: DecreaseLiquidity') ||
-    l.includes('Instruction: DecreaseLiquidityV2')
+  const hasIncreaseLiquidity = logs.some(
+    (l) =>
+      l.includes('Instruction: IncreaseLiquidity') ||
+      l.includes('Instruction: IncreaseLiquidityV2'),
   );
-  const hasIncreaseLiquidity = logs.some(l =>
-    l.includes('Instruction: IncreaseLiquidity') ||
-    l.includes('Instruction: IncreaseLiquidityV2')
-  );
-  const hasClosePosition = logs.some(l =>
-    l.includes('Instruction: ClosePosition')
-  );
+  const hasClosePosition = logs.some((l) => l.includes('Instruction: ClosePosition'));
 
   let refererPosition: string | null = null;
   if (hasMemo) {
@@ -1279,7 +1393,10 @@ function parsePcsOpenPositions(
   return events;
 }
 
-function parsePcsIncreaseLiquidity(tx: ParsedTransactionWithMeta, targetWallet: PublicKey): ParsedEvent[] {
+function parsePcsIncreaseLiquidity(
+  tx: ParsedTransactionWithMeta,
+  targetWallet: PublicKey,
+): ParsedEvent[] {
   const preBalances = tx.meta?.preTokenBalances || [];
   const targetStr = targetWallet.toBase58();
   const events: ParsedEvent[] = [];
@@ -1338,7 +1455,7 @@ function findAllDammv2Instructions(tx: ParsedTransactionWithMeta): PartiallyDeco
     }
   }
 
-  for (const inner of (tx.meta?.innerInstructions || [])) {
+  for (const inner of tx.meta?.innerInstructions || []) {
     for (const ix of inner.instructions) {
       if ('programId' in ix && ix.programId.toBase58() === DAMMV2_PROGRAM_ID) {
         results.push(ix as PartiallyDecodedInstruction);
@@ -1377,7 +1494,8 @@ function parseDammv2Operations(
     if (name === 'create_position') hasCreatePosition = true;
     else if (name === 'close_position') hasClosePosition = true;
     else if (name === 'add_liquidity') hasAddLiquidity = true;
-    else if (name === 'remove_liquidity' || name === 'remove_all_liquidity') hasRemoveLiquidity = true;
+    else if (name === 'remove_liquidity' || name === 'remove_all_liquidity')
+      hasRemoveLiquidity = true;
     else if (name === 'claim_position_fee') hasClaimFee = true;
   }
 
@@ -1394,7 +1512,13 @@ function parseDammv2Operations(
   }
 
   // claimFee alone (no remove/close) -> treat as remove event for fee collection (same as Orca pattern)
-  if (hasClaimFee && !hasRemoveLiquidity && !hasClosePosition && !hasCreatePosition && !hasAddLiquidity) {
+  if (
+    hasClaimFee &&
+    !hasRemoveLiquidity &&
+    !hasClosePosition &&
+    !hasCreatePosition &&
+    !hasAddLiquidity
+  ) {
     // Find NFT mint from pre-token-balances (position NFT held by target)
     const preBalances = tx.meta?.preTokenBalances || [];
     const targetStr = targetWallet.toBase58();
@@ -1458,7 +1582,10 @@ function parseDammv2OpenPositions(
  * Parse DAMM v2 add_liquidity events.
  * Find the position NFT from pre-token-balances (existing NFT held by target).
  */
-function parseDammv2AddLiquidity(tx: ParsedTransactionWithMeta, targetWallet: PublicKey): ParsedEvent[] {
+function parseDammv2AddLiquidity(
+  tx: ParsedTransactionWithMeta,
+  targetWallet: PublicKey,
+): ParsedEvent[] {
   const preBalances = tx.meta?.preTokenBalances || [];
   const targetStr = targetWallet.toBase58();
   const events: ParsedEvent[] = [];

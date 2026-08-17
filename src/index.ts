@@ -14,7 +14,20 @@ import { PcsPositionExecutor } from './executor/pancakeswap-position';
 import { DammV2PositionExecutor } from './executor/dammv2-position';
 import { PositionMap } from './state/position-map';
 import { startDashboard, refreshSolPrice } from './dashboard/server';
-import { startAssetTrendCollector, stopAssetTrendCollector, setSnapshotCallback, setRentPerPosition, setOrcaRentPerPosition, setOrcaLpFetcher, setMeteoraRentPerPosition, setMeteoraLpFetcher, setPcsRentPerPosition, setPcsLpFetcher, setDammV2RentPerPosition, setDammV2LpFetcher } from './dashboard/asset-trend';
+import {
+  startAssetTrendCollector,
+  stopAssetTrendCollector,
+  setSnapshotCallback,
+  setRentPerPosition,
+  setOrcaRentPerPosition,
+  setOrcaLpFetcher,
+  setMeteoraRentPerPosition,
+  setMeteoraLpFetcher,
+  setPcsRentPerPosition,
+  setPcsLpFetcher,
+  setDammV2RentPerPosition,
+  setDammV2LpFetcher,
+} from './dashboard/asset-trend';
 import { startPoolTvlCollector, stopPoolTvlCollector } from './monitor/pool-tvl';
 import { startAutoClaimScheduler, stopAutoClaimScheduler } from './executor/auto-claim';
 import { startDacScheduler, stopDacScheduler } from './executor/dac';
@@ -54,7 +67,9 @@ function acquireLock(): void {
 function releaseLock(): void {
   try {
     if (fs.existsSync(LOCK_FILE)) fs.unlinkSync(LOCK_FILE);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // --- Disk-persisted event log (with poolMap for permanent nft→pool lookup) ---
@@ -72,7 +87,9 @@ function loadEventLog(): EventLogEntry[] {
         return raw.events;
       }
     }
-  } catch { /* corrupted, start fresh */ }
+  } catch {
+    /* corrupted, start fresh */
+  }
   return [];
 }
 
@@ -93,7 +110,9 @@ function loadSwapHistory(): SwapHistoryEntry[] {
       const data = JSON.parse(fs.readFileSync(SWAP_HISTORY_FILE, 'utf-8'));
       if (Array.isArray(data)) return data;
     }
-  } catch { /* corrupted, start fresh */ }
+  } catch {
+    /* corrupted, start fresh */
+  }
   return [];
 }
 
@@ -121,7 +140,7 @@ async function main() {
   }
   // Log close-only wallets not in targetWallets
   for (const addr of config.closeOnlyWallets) {
-    if (!config.targetWallets.some(t => t.toBase58() === addr)) {
+    if (!config.targetWallets.some((t) => t.toBase58() === addr)) {
       logger.info(MODULE, `  -> ${addr} [CLOSE-ONLY]`);
     }
   }
@@ -163,7 +182,10 @@ async function main() {
       logger.info(MODULE, `  -> ${addr}: ratio=${ratio}`);
     }
   }
-  logger.info(MODULE, `RPC send: Helius | RPC read: ${config.readRpcUrl ? 'Alchemy' : 'Helius (same)'}`);
+  logger.info(
+    MODULE,
+    `RPC send: Helius | RPC read: ${config.readRpcUrl ? 'Alchemy' : 'Helius (same)'}`,
+  );
 
   // Initialize components
   const monitor = new WebSocketMonitor();
@@ -174,9 +196,14 @@ async function main() {
   const positionMap = new PositionMap();
 
   const byrealExecutor = new ByrealPositionExecutor(connection, positionMap);
-  const orcaExecutor = config.orcaEnabled ? new OrcaPositionExecutor(connection, positionMap) : null;
+  const orcaExecutor = config.orcaEnabled
+    ? new OrcaPositionExecutor(connection, positionMap)
+    : null;
   if (orcaExecutor) {
-    logger.info(MODULE, `Orca Whirlpool enabled: ${config.orcaTargetWallets.length} target wallets`);
+    logger.info(
+      MODULE,
+      `Orca Whirlpool enabled: ${config.orcaTargetWallets.length} target wallets`,
+    );
     // Wire up Orca position checker for reconcile backfill
     byrealExecutor.isOrcaPositionChecker = (nft) => orcaExecutor.isOrcaPosition(nft);
   }
@@ -185,15 +212,19 @@ async function main() {
     ? new MeteoraPositionExecutor(connection, positionMap)
     : null;
   if (meteoraExecutor) {
-    logger.info(MODULE, `Meteora DLMM enabled: ${config.meteoraTargetWallets.length} target wallets`);
+    logger.info(
+      MODULE,
+      `Meteora DLMM enabled: ${config.meteoraTargetWallets.length} target wallets`,
+    );
     byrealExecutor.isMeteoraPositionChecker = (pos) => meteoraExecutor.isMeteoraPosition(pos);
   }
 
-  const pcsExecutor = config.pcsEnabled
-    ? new PcsPositionExecutor(connection, positionMap)
-    : null;
+  const pcsExecutor = config.pcsEnabled ? new PcsPositionExecutor(connection, positionMap) : null;
   if (pcsExecutor) {
-    logger.info(MODULE, `PancakeSwap CLMM enabled: ${config.pcsTargetWallets.length} target wallets`);
+    logger.info(
+      MODULE,
+      `PancakeSwap CLMM enabled: ${config.pcsTargetWallets.length} target wallets`,
+    );
     byrealExecutor.isPcsPositionChecker = (nft) => pcsExecutor.isPcsPosition(nft);
   }
 
@@ -201,7 +232,10 @@ async function main() {
     ? new DammV2PositionExecutor(connection, positionMap)
     : null;
   if (dammv2Executor) {
-    logger.info(MODULE, `Meteora DAMM v2 enabled: ${config.dammv2TargetWallets.length} target wallets`);
+    logger.info(
+      MODULE,
+      `Meteora DAMM v2 enabled: ${config.dammv2TargetWallets.length} target wallets`,
+    );
   }
 
   // When WebSocket reconnects with a new Connection, propagate to all components
@@ -220,14 +254,18 @@ async function main() {
   const processedSignatures = new Set<string>(); // Dedup WebSocket duplicates
   const eventLog: EventLogEntry[] = loadEventLog();
   const swapHistory: SwapHistoryEntry[] = loadSwapHistory();
-  logger.info(MODULE, `Loaded ${eventLog.length} events and ${swapHistory.length} swap records from disk`);
+  logger.info(
+    MODULE,
+    `Loaded ${eventLog.length} events and ${swapHistory.length} swap records from disk`,
+  );
 
   // Backfill pool info: seed poolMap from position map + existing events, then fill gaps
   for (const [targetNft, entry] of Object.entries(positionMap.toJSON())) {
     if (entry.pool && !eventPoolMap[targetNft]) eventPoolMap[targetNft] = entry.pool;
   }
   for (const evt of eventLog) {
-    if (evt.pool && evt.targetNft && !eventPoolMap[evt.targetNft]) eventPoolMap[evt.targetNft] = evt.pool;
+    if (evt.pool && evt.targetNft && !eventPoolMap[evt.targetNft])
+      eventPoolMap[evt.targetNft] = evt.pool;
   }
   let backfilled = 0;
   for (const evt of eventLog) {
@@ -238,7 +276,11 @@ async function main() {
   }
   if (backfilled > 0 || Object.keys(eventPoolMap).length > 0) {
     saveEventLog(eventLog);
-    if (backfilled > 0) logger.info(MODULE, `Backfilled pool info for ${backfilled} events (poolMap: ${Object.keys(eventPoolMap).length} entries)`);
+    if (backfilled > 0)
+      logger.info(
+        MODULE,
+        `Backfilled pool info for ${backfilled} events (poolMap: ${Object.keys(eventPoolMap).length} entries)`,
+      );
   }
 
   const opQueue = new OperationQueue();
@@ -259,19 +301,23 @@ async function main() {
     logger.info(MODULE, `[${botLabel}] TX detected: ${signature}`);
 
     // Pre-enqueue spam filter: skip mass SOL-transfer TXs that don't involve any DEX
-    const involvesDex = logs.some(l =>
-      l.includes(config.byrealProgramId.toBase58()) ||
-      l.includes(config.orcaProgramId.toBase58()) ||
-      l.includes(config.meteoraProgramId.toBase58()) ||
-      (config.pcsEnabled && l.includes(config.pcsProgramId.toBase58())) ||
-      l.includes('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'), // DAMMV2
+    const involvesDex = logs.some(
+      (l) =>
+        l.includes(config.byrealProgramId.toBase58()) ||
+        l.includes(config.orcaProgramId.toBase58()) ||
+        l.includes(config.meteoraProgramId.toBase58()) ||
+        (config.pcsEnabled && l.includes(config.pcsProgramId.toBase58())) ||
+        l.includes('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'), // DAMMV2
     );
     if (!involvesDex) {
       const SYS_SUCCESS = 'Program 11111111111111111111111111111111 success';
-      const sysCount = logs.filter(l => l === SYS_SUCCESS).length;
-      const hasCB = logs.some(l => l.includes('ComputeBudget111111111111111111111111111111'));
+      const sysCount = logs.filter((l) => l === SYS_SUCCESS).length;
+      const hasCB = logs.some((l) => l.includes('ComputeBudget111111111111111111111111111111'));
       if (sysCount >= 5 && !hasCB) {
-        logger.debug(MODULE, `[${botLabel}] Spam TX filtered pre-queue (${sysCount}x sys): ${signature.slice(0, 8)}`);
+        logger.debug(
+          MODULE,
+          `[${botLabel}] Spam TX filtered pre-queue (${sysCount}x sys): ${signature.slice(0, 8)}`,
+        );
         return;
       }
     }
@@ -280,7 +326,20 @@ async function main() {
       try {
         const events = await parseTransaction(readConnection, signature, logs, targetWallet);
         for (const event of events) {
-          await handleEvent(byrealExecutor, orcaExecutor, meteoraExecutor, pcsExecutor, dammv2Executor, event, signature, botLabel, targetWallet, eventLog, swapHistory, positionMap);
+          await handleEvent(
+            byrealExecutor,
+            orcaExecutor,
+            meteoraExecutor,
+            pcsExecutor,
+            dammv2Executor,
+            event,
+            signature,
+            botLabel,
+            targetWallet,
+            eventLog,
+            swapHistory,
+            positionMap,
+          );
         }
       } catch (err: any) {
         logger.error(MODULE, `Error processing TX ${signature}: ${err.message}`);
@@ -306,50 +365,65 @@ async function main() {
   startDashboard(botContext);
 
   // Init dynamic rent per position from RPC, then propagate to asset-trend + backfill position map
-  byrealExecutor.initRentPerPosition().then(() => {
-    setRentPerPosition(byrealExecutor.rentPerPosition);
-    byrealExecutor.backfillLockedSol();
-  }).catch(err => {
-    logger.warn(MODULE, `Rent init error (using fallback): ${err.message}`);
-  });
+  byrealExecutor
+    .initRentPerPosition()
+    .then(() => {
+      setRentPerPosition(byrealExecutor.rentPerPosition);
+      byrealExecutor.backfillLockedSol();
+    })
+    .catch((err) => {
+      logger.warn(MODULE, `Rent init error (using fallback): ${err.message}`);
+    });
 
   if (orcaExecutor) {
-    orcaExecutor.initRentPerPosition().then(() => {
-      setOrcaRentPerPosition(orcaExecutor!.rentPerPosition);
-      orcaExecutor!.backfillLockedSol();
-    }).catch(err => {
-      logger.warn(MODULE, `Orca rent init error (using fallback): ${err.message}`);
-    });
+    orcaExecutor
+      .initRentPerPosition()
+      .then(() => {
+        setOrcaRentPerPosition(orcaExecutor!.rentPerPosition);
+        orcaExecutor!.backfillLockedSol();
+      })
+      .catch((err) => {
+        logger.warn(MODULE, `Orca rent init error (using fallback): ${err.message}`);
+      });
     setOrcaLpFetcher(() => orcaExecutor!.getOrcaLpValueUsd());
   }
 
   if (meteoraExecutor) {
-    meteoraExecutor.initRentPerPosition().then(() => {
-      setMeteoraRentPerPosition(meteoraExecutor!.rentPerPosition);
-      meteoraExecutor!.backfillLockedSol();
-    }).catch(err => {
-      logger.warn(MODULE, `Meteora rent init error (using fallback): ${err.message}`);
-    });
+    meteoraExecutor
+      .initRentPerPosition()
+      .then(() => {
+        setMeteoraRentPerPosition(meteoraExecutor!.rentPerPosition);
+        meteoraExecutor!.backfillLockedSol();
+      })
+      .catch((err) => {
+        logger.warn(MODULE, `Meteora rent init error (using fallback): ${err.message}`);
+      });
     setMeteoraLpFetcher(() => meteoraExecutor!.getMeteoraLpDetails());
   }
 
   if (pcsExecutor) {
-    pcsExecutor.initRentPerPosition().then(() => {
-      setPcsRentPerPosition(pcsExecutor!.rentPerPosition);
-      pcsExecutor!.backfillLockedSol();
-    }).catch(err => {
-      logger.warn(MODULE, `PCS rent init error (using fallback): ${err.message}`);
-    });
+    pcsExecutor
+      .initRentPerPosition()
+      .then(() => {
+        setPcsRentPerPosition(pcsExecutor!.rentPerPosition);
+        pcsExecutor!.backfillLockedSol();
+      })
+      .catch((err) => {
+        logger.warn(MODULE, `PCS rent init error (using fallback): ${err.message}`);
+      });
     setPcsLpFetcher(() => pcsExecutor!.getPcsLpDetails());
   }
 
   if (dammv2Executor) {
-    dammv2Executor.initRentPerPosition().then(() => {
-      setDammV2RentPerPosition(dammv2Executor!.rentPerPosition);
-      dammv2Executor!.backfillLockedSol();
-    }).catch(err => {
-      logger.warn(MODULE, `DAMM v2 rent init error (using fallback): ${err.message}`);
-    });
+    dammv2Executor
+      .initRentPerPosition()
+      .then(() => {
+        setDammV2RentPerPosition(dammv2Executor!.rentPerPosition);
+        dammv2Executor!.backfillLockedSol();
+      })
+      .catch((err) => {
+        logger.warn(MODULE, `DAMM v2 rent init error (using fallback): ${err.message}`);
+      });
     setDammV2LpFetcher(async () => {
       const d = await dammv2Executor!.getDammV2LpDetails();
       // getDammV2LpDetails returns { positions, totalUsd }; we need { lpUsd, feeUsd, count }
@@ -376,12 +450,16 @@ async function main() {
     }
     if (byrealExecutor.drawdownPaused) return; // Already paused
     if (config.drawdownThresholdPct <= 0) return; // Disabled
-    const drawdown = (byrealExecutor.startAssetUsd - totalUsd) / byrealExecutor.startAssetUsd * 100;
+    const drawdown =
+      ((byrealExecutor.startAssetUsd - totalUsd) / byrealExecutor.startAssetUsd) * 100;
     if (drawdown >= config.drawdownThresholdPct) {
       if (!byrealExecutor.drawdownWarning) {
         // First detection — warn and wait for next snapshot to confirm
         byrealExecutor.drawdownWarning = true;
-        logger.warn(MODULE, `[RiskMgmt] 資產跌幅 ${drawdown.toFixed(1)}% 超過門檻 ${config.drawdownThresholdPct}%，等待下次快照確認...`);
+        logger.warn(
+          MODULE,
+          `[RiskMgmt] 資產跌幅 ${drawdown.toFixed(1)}% 超過門檻 ${config.drawdownThresholdPct}%，等待下次快照確認...`,
+        );
       } else {
         // Second consecutive detection — confirmed, pause
         byrealExecutor.drawdownPaused = true;
@@ -402,7 +480,10 @@ async function main() {
           dammv2Executor.drawdownPaused = true;
           dammv2Executor.drawdownPausedAt = Date.now();
         }
-        logger.error(MODULE, `[RiskMgmt] 資產跌幅 ${drawdown.toFixed(1)}% 連續確認，已暫停所有開倉（需手動重啟）`);
+        logger.error(
+          MODULE,
+          `[RiskMgmt] 資產跌幅 ${drawdown.toFixed(1)}% 連續確認，已暫停所有開倉（需手動重啟）`,
+        );
         notifyDrawdownPause(drawdown, byrealExecutor.startAssetUsd!, totalUsd);
       }
     } else {
@@ -417,11 +498,14 @@ async function main() {
   const reconcileIntervalMs = Math.max(1, config.reconcileIntervalMinutes) * 60 * 1000;
 
   // Periodic maintenance: log pending status (every 10 min) + reconcile orphans (default every 6 hours)
-  const maintenanceTimer = setInterval(() => {
-    byrealExecutor.logPendingStatus().catch(err => {
-      logger.error(MODULE, `Pending status check error: ${err.message}`);
-    });
-  }, 10 * 60 * 1000);
+  const maintenanceTimer = setInterval(
+    () => {
+      byrealExecutor.logPendingStatus().catch((err) => {
+        logger.error(MODULE, `Pending status check error: ${err.message}`);
+      });
+    },
+    10 * 60 * 1000,
+  );
 
   // Stagger reconcile timers to avoid Alchemy 429 burst (v1.24.8)
   // Each DEX reconciler fires 15s apart, starting 60s after the interval
@@ -429,24 +513,40 @@ async function main() {
   const reconcileTimer = setInterval(() => {
     setTimeout(() => byrealExecutor.enqueueReconcile(opQueue), 60_000);
     if (orcaExecutor) {
-      setTimeout(() => orcaExecutor.reconcileOrcaPositions(opQueue).catch(err => {
-        logger.error(MODULE, `Orca reconcile error: ${err.message}`);
-      }), 75_000);
+      setTimeout(
+        () =>
+          orcaExecutor.reconcileOrcaPositions(opQueue).catch((err) => {
+            logger.error(MODULE, `Orca reconcile error: ${err.message}`);
+          }),
+        75_000,
+      );
     }
     if (meteoraExecutor) {
-      setTimeout(() => meteoraExecutor.reconcileMeteoraPositions(opQueue).catch(err => {
-        logger.error(MODULE, `Meteora reconcile error: ${err.message}`);
-      }), 90_000);
+      setTimeout(
+        () =>
+          meteoraExecutor.reconcileMeteoraPositions(opQueue).catch((err) => {
+            logger.error(MODULE, `Meteora reconcile error: ${err.message}`);
+          }),
+        90_000,
+      );
     }
     if (pcsExecutor) {
-      setTimeout(() => pcsExecutor.reconcilePcsPositions(opQueue).catch(err => {
-        logger.error(MODULE, `PCS reconcile error: ${err.message}`);
-      }), 105_000);
+      setTimeout(
+        () =>
+          pcsExecutor.reconcilePcsPositions(opQueue).catch((err) => {
+            logger.error(MODULE, `PCS reconcile error: ${err.message}`);
+          }),
+        105_000,
+      );
     }
     if (dammv2Executor) {
-      setTimeout(() => dammv2Executor.reconcileDammV2Positions(opQueue).catch(err => {
-        logger.error(MODULE, `DAMM v2 reconcile error: ${err.message}`);
-      }), 120_000);
+      setTimeout(
+        () =>
+          dammv2Executor.reconcileDammV2Positions(opQueue).catch((err) => {
+            logger.error(MODULE, `DAMM v2 reconcile error: ${err.message}`);
+          }),
+        120_000,
+      );
     }
   }, reconcileIntervalMs);
 
@@ -483,7 +583,7 @@ async function main() {
   logger.info(MODULE, '=== Bot running. Waiting for target activity... ===');
 
   // Backfill pool info for positions opened before v1.3.8 (non-blocking)
-  byrealExecutor.backfillPoolInfo().catch(err => {
+  byrealExecutor.backfillPoolInfo().catch((err) => {
     logger.warn(MODULE, `Pool backfill error: ${err.message}`);
   });
 }
@@ -496,7 +596,7 @@ function pushEvent(eventLog: EventLogEntry[], entry: EventLogEntry, dex?: string
     const removed = eventLog.shift();
     // Clean poolMap if no remaining event references this targetNft
     if (removed?.targetNft && eventPoolMap[removed.targetNft]) {
-      const stillUsed = eventLog.some(e => e.targetNft === removed.targetNft);
+      const stillUsed = eventLog.some((e) => e.targetNft === removed.targetNft);
       if (!stillUsed) delete eventPoolMap[removed.targetNft];
     }
   }
@@ -510,9 +610,13 @@ function pushSwap(swapHistory: SwapHistoryEntry[], entry: SwapHistoryEntry): voi
 }
 
 /** Fetch PnL for a closed position from Byreal API (for token cooldown tracking) */
-async function fetchPositionPnl(executor: ByrealPositionExecutor, pool: string, ourNft: string): Promise<void> {
+async function fetchPositionPnl(
+  executor: ByrealPositionExecutor,
+  pool: string,
+  ourNft: string,
+): Promise<void> {
   // Wait for API to update after close
-  await new Promise(r => setTimeout(r, 5000));
+  await new Promise((r) => setTimeout(r, 5000));
 
   const address = getUserAddress().toBase58();
   const res = await fetch(
@@ -520,13 +624,13 @@ async function fetchPositionPnl(executor: ByrealPositionExecutor, pool: string, 
     {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.byreal.io/',
+        Accept: 'application/json',
+        Referer: 'https://www.byreal.io/',
       },
     },
   );
   if (!res.ok) return;
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
   const positions = data?.result?.data?.positions;
   if (!Array.isArray(positions)) return;
 
@@ -537,7 +641,10 @@ async function fetchPositionPnl(executor: ByrealPositionExecutor, pool: string, 
     const earnedFees = parseFloat(match.earnedUsd || '0');
     const bonus = parseFloat(match.bonusUsd || '0');
     const totalPnl = positionPnl + earnedFees + bonus;
-    logger.info('RiskMgmt', `CLOSE PnL for ${pool.split('/')[0]?.slice(0, 8)}…: position=$${positionPnl.toFixed(4)} fees=$${earnedFees.toFixed(4)} bonus=$${bonus.toFixed(4)} → total=$${totalPnl.toFixed(4)}`);
+    logger.info(
+      'RiskMgmt',
+      `CLOSE PnL for ${pool.split('/')[0]?.slice(0, 8)}…: position=$${positionPnl.toFixed(4)} fees=$${earnedFees.toFixed(4)} bonus=$${bonus.toFixed(4)} → total=$${totalPnl.toFixed(4)}`,
+    );
     executor.recordTokenPnl(pool, totalPnl);
   }
 }
@@ -559,14 +666,19 @@ async function handleEvent(
   const isCloseOnly = config.closeOnlyWallets.has(targetWallet.toBase58());
 
   // Derive DEX from event type for event log tagging
-  const eventDex: string | undefined =
-    event.type.startsWith('DAMMV2_') ? 'dammv2' :
-    event.type.startsWith('ORCA_') ? 'orca' :
-    event.type.startsWith('METEORA_') ? 'meteora' :
-    event.type.startsWith('PCS_') ? 'pancakeswap' :
-    event.type === 'JUPITER_SWAP' ? undefined :
-    event.type === 'UNKNOWN' ? undefined :
-    'byreal';
+  const eventDex: string | undefined = event.type.startsWith('DAMMV2_')
+    ? 'dammv2'
+    : event.type.startsWith('ORCA_')
+      ? 'orca'
+      : event.type.startsWith('METEORA_')
+        ? 'meteora'
+        : event.type.startsWith('PCS_')
+          ? 'pancakeswap'
+          : event.type === 'JUPITER_SWAP'
+            ? undefined
+            : event.type === 'UNKNOWN'
+              ? undefined
+              : 'byreal';
 
   // Local pushEvent wrapper that auto-tags dex
   const push = (entry: EventLogEntry) => pushEvent(eventLog, entry, eventDex);
@@ -574,10 +686,14 @@ async function handleEvent(
   switch (event.type) {
     case 'JUPITER_SWAP': {
       const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-      logger.info(MODULE, `[${botLabel}][JUPITER SWAP] ${event.inputMint.slice(0, 8)} -> ${event.outputMint.slice(0, 8)}`, {
-        inputAmount: event.inputAmount,
-        outputAmount: event.outputAmount,
-      });
+      logger.info(
+        MODULE,
+        `[${botLabel}][JUPITER SWAP] ${event.inputMint.slice(0, 8)} -> ${event.outputMint.slice(0, 8)}`,
+        {
+          inputAmount: event.inputAmount,
+          outputAmount: event.outputAmount,
+        },
+      );
 
       // Target selling token → USDC: swap targetAmount × walletRatio, capped at bot balance
       if (event.outputMint === USDC_MINT) {
@@ -595,12 +711,18 @@ async function handleEvent(
         const ratioBps = Math.floor(walletRatio * 10000);
         const scaledAmount = targetRaw.mul(new BN(ratioBps)).div(new BN(10000));
         const maxAmountRaw = scaledAmount.gt(new BN(0)) ? scaledAmount.toString() : undefined;
-        logger.info(MODULE, `[${botLabel}][JUPITER SWAP] Target swapped ${event.inputAmountRaw} × ratio=${walletRatio} → max=${maxAmountRaw || 'all'}`);
+        logger.info(
+          MODULE,
+          `[${botLabel}][JUPITER SWAP] Target swapped ${event.inputAmountRaw} × ratio=${walletRatio} → max=${maxAmountRaw || 'all'}`,
+        );
         const result = await byrealExecutor.swapTokenToUSDC(event.inputMint, maxAmountRaw);
         if (result) {
           push({
-            ts: Date.now(), type: 'SWAP', targetWallet: targetWallet.toBase58(),
-            txSig: result.sig, success: true,
+            ts: Date.now(),
+            type: 'SWAP',
+            targetWallet: targetWallet.toBase58(),
+            txSig: result.sig,
+            success: true,
             pool: `${event.inputMint}/${USDC_MINT}`,
           });
           pushSwap(swapHistory, {
@@ -622,24 +744,36 @@ async function handleEvent(
       if (byrealExecutor.solPaused) {
         logger.warn(MODULE, `[${botLabel}][OPEN] Skipped (SOL 不足暫停中)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'SOL 不足',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'SOL 不足',
         });
         break;
       }
       if (byrealExecutor.drawdownPaused) {
         logger.warn(MODULE, `[${botLabel}][OPEN] Skipped (資產跌幅暫停)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '資產跌幅暫停',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '資產跌幅暫停',
         });
         break;
       }
       if (isCloseOnly) {
         logger.info(MODULE, `[${botLabel}][OPEN] Skipped (close-only target)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'close-only',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'close-only',
         });
         break;
       }
@@ -655,8 +789,12 @@ async function handleEvent(
       if (openPoolMints && byrealExecutor.isTokenCoolingDown(openPoolMints)) {
         logger.warn(MODULE, `[${botLabel}][OPEN] Skipped (代幣冷靜期: ${openPoolMints})`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '代幣冷靜期',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '代幣冷靜期',
           pool: openPoolMints,
         });
         break;
@@ -666,8 +804,12 @@ async function handleEvent(
       if (openPoolMints && byrealExecutor.isTokenBlacklisted(openPoolMints)) {
         logger.warn(MODULE, `[${botLabel}][OPEN] Skipped (黑名單代幣: ${openPoolMints})`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '黑名單代幣',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '黑名單代幣',
           pool: openPoolMints,
         });
         break;
@@ -681,18 +823,32 @@ async function handleEvent(
 
       // Pre-check: skip if duplicate (not a failure)
       if (byrealExecutor.hasMapping(event.positionNftMint)) {
-        logger.info(MODULE, `[${botLabel}][OPEN] Already mapped ${event.positionNftMint.slice(0, 8)}, skipping`);
+        logger.info(
+          MODULE,
+          `[${botLabel}][OPEN] Already mapped ${event.positionNftMint.slice(0, 8)}, skipping`,
+        );
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '重複目標',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '重複目標',
         });
         break;
       }
       if (byrealExecutor.isRefererDuplicate(event.refererPosition, targetWallet.toBase58())) {
-        logger.info(MODULE, `[${botLabel}][OPEN] Duplicate referer ${event.refererPosition?.slice(0, 8)}, skipping`);
+        logger.info(
+          MODULE,
+          `[${botLabel}][OPEN] Duplicate referer ${event.refererPosition?.slice(0, 8)}, skipping`,
+        );
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '重複來源',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '重複來源',
         });
         break;
       }
@@ -710,16 +866,24 @@ async function handleEvent(
 
       if (ourSig === null && skipReason) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: skipReason,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: skipReason,
           pool: positionMap.getPool(event.positionNftMint),
         });
         break;
       }
 
       push({
-        ts: Date.now(), type: 'OPEN', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'OPEN',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: positionMap.getPool(event.positionNftMint),
       });
 
@@ -735,24 +899,36 @@ async function handleEvent(
       if (byrealExecutor.solPaused) {
         logger.warn(MODULE, `[${botLabel}][INCREASE] Skipped (SOL 不足暫停中)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'SOL 不足',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'SOL 不足',
         });
         break;
       }
       if (byrealExecutor.drawdownPaused) {
         logger.warn(MODULE, `[${botLabel}][INCREASE] Skipped (資產跌幅暫停)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '資產跌幅暫停',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '資產跌幅暫停',
         });
         break;
       }
       if (isCloseOnly) {
         logger.info(MODULE, `[${botLabel}][INCREASE] Skipped (close-only target)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'close-only',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'close-only',
         });
         break;
       }
@@ -761,8 +937,12 @@ async function handleEvent(
       if (increasePool && byrealExecutor.isTokenBlacklisted(increasePool)) {
         logger.warn(MODULE, `[${botLabel}][INCREASE] Skipped (黑名單代幣: ${increasePool})`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '黑名單代幣',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '黑名單代幣',
           pool: increasePool,
         });
         break;
@@ -771,16 +951,27 @@ async function handleEvent(
 
       if (!byrealExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '無映射',
         });
         break;
       }
 
-      const ourSig = await byrealExecutor.copyIncreaseLiquidity(event.positionNftMint, targetWallet.toBase58());
+      const ourSig = await byrealExecutor.copyIncreaseLiquidity(
+        event.positionNftMint,
+        targetWallet.toBase58(),
+      );
       push({
-        ts: Date.now(), type: 'INCREASE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'INCREASE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
       });
       if (ourSig) {
         logger.info(MODULE, `[${botLabel}][INCREASE] Our TX: ${ourSig}`);
@@ -794,8 +985,12 @@ async function handleEvent(
 
       if (!byrealExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '無映射',
         });
         break;
       }
@@ -803,8 +998,12 @@ async function handleEvent(
       const result = await byrealExecutor.copyDecreaseLiquidity(event.positionNftMint);
       const evtType = result?.type || 'DECREASE';
       push({
-        ts: Date.now(), type: evtType, targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: result?.txSig || undefined, success: !!result,
+        ts: Date.now(),
+        type: evtType,
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: result?.txSig || undefined,
+        success: !!result,
       });
       if (result) {
         logger.info(MODULE, `[${botLabel}][${evtType}] Our TX: ${result.txSig}`);
@@ -821,8 +1020,12 @@ async function handleEvent(
 
       if (!byrealExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: '無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: '無映射',
         });
         break;
       }
@@ -832,8 +1035,12 @@ async function handleEvent(
       const closeOurNft = positionMap.get(event.positionNftMint);
       const ourSig = await byrealExecutor.copyClosePosition(event.positionNftMint);
       push({
-        ts: Date.now(), type: 'CLOSE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'CLOSE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: closePool,
       });
       if (ourSig) {
@@ -842,7 +1049,7 @@ async function handleEvent(
         byrealExecutor.invalidateAssetCaches();
         // Async PnL check for token cooldown (non-blocking)
         if (closePool && closeOurNft) {
-          fetchPositionPnl(byrealExecutor, closePool, closeOurNft).catch(err => {
+          fetchPositionPnl(byrealExecutor, closePool, closeOurNft).catch((err) => {
             logger.debug(MODULE, `PnL check failed: ${err.message}`);
           });
         }
@@ -861,27 +1068,42 @@ async function handleEvent(
         const reason = orcaExecutor.solPaused ? 'SOL 不足' : '資產跌幅暫停';
         logger.warn(MODULE, `[${botLabel}][ORCA OPEN] Skipped (${reason})`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: `Orca: ${reason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: `Orca: ${reason}`,
         });
         break;
       }
       if (config.orcaCloseOnlyWallets.has(targetWallet.toBase58())) {
         logger.info(MODULE, `[${botLabel}][ORCA OPEN] Skipped (close-only target)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'Orca close-only',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'Orca close-only',
         });
         break;
       }
 
-      logger.info(MODULE, `[${botLabel}][ORCA OPEN] pool=${event.poolAddress.slice(0, 8)} ticks=[${event.tickLower},${event.tickUpper}] nft=${event.positionNftMint.slice(0, 8)}`);
+      logger.info(
+        MODULE,
+        `[${botLabel}][ORCA OPEN] pool=${event.poolAddress.slice(0, 8)} ticks=[${event.tickLower},${event.tickUpper}] nft=${event.positionNftMint.slice(0, 8)}`,
+      );
 
       if (orcaExecutor.hasMapping(event.positionNftMint)) {
         logger.info(MODULE, `[${botLabel}][ORCA OPEN] Already mapped, skipping`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'Orca 重複目標',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'Orca 重複目標',
         });
         break;
       }
@@ -897,16 +1119,24 @@ async function handleEvent(
 
       if (ourSig === null && skipReason) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: `Orca: ${skipReason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: `Orca: ${skipReason}`,
           pool: event.poolMints,
         });
         break;
       }
 
       push({
-        ts: Date.now(), type: 'OPEN', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'OPEN',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: event.poolMints || positionMap.getPool(event.positionNftMint),
       });
       if (ourSig) {
@@ -922,8 +1152,12 @@ async function handleEvent(
       if (orcaExecutor.solPaused || orcaExecutor.drawdownPaused) {
         logger.warn(MODULE, `[${botLabel}][ORCA INCREASE] Skipped (paused)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'Orca paused',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'Orca paused',
         });
         break;
       }
@@ -935,16 +1169,27 @@ async function handleEvent(
 
       if (!orcaExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'Orca 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'Orca 無映射',
         });
         break;
       }
 
-      const ourSig = await orcaExecutor.copyIncreaseLiquidity(event.positionNftMint, targetWallet.toBase58());
+      const ourSig = await orcaExecutor.copyIncreaseLiquidity(
+        event.positionNftMint,
+        targetWallet.toBase58(),
+      );
       push({
-        ts: Date.now(), type: 'INCREASE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'INCREASE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
       });
       if (ourSig) {
         logger.info(MODULE, `[${botLabel}][ORCA INCREASE] Our TX: ${ourSig}`);
@@ -959,8 +1204,12 @@ async function handleEvent(
 
       if (!orcaExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'Orca 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'Orca 無映射',
         });
         break;
       }
@@ -968,8 +1217,12 @@ async function handleEvent(
       const result = await orcaExecutor.copyDecreaseLiquidity(event.positionNftMint);
       const evtType = result?.type || 'DECREASE';
       push({
-        ts: Date.now(), type: evtType, targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: result?.txSig || undefined, success: !!result,
+        ts: Date.now(),
+        type: evtType,
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: result?.txSig || undefined,
+        success: !!result,
       });
       if (result) {
         logger.info(MODULE, `[${botLabel}][ORCA ${evtType}] Our TX: ${result.txSig}`);
@@ -986,8 +1239,12 @@ async function handleEvent(
 
       if (!orcaExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'Orca 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'Orca 無映射',
         });
         break;
       }
@@ -995,8 +1252,12 @@ async function handleEvent(
       const closePool = positionMap.getPool(event.positionNftMint);
       const ourSig = await orcaExecutor.copyClosePosition(event.positionNftMint);
       push({
-        ts: Date.now(), type: 'CLOSE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'CLOSE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: closePool,
       });
       if (ourSig) {
@@ -1018,27 +1279,42 @@ async function handleEvent(
         const reason = meteoraExecutor.solPaused ? 'SOL 不足' : '資產跌幅暫停';
         logger.warn(MODULE, `[${botLabel}][METEORA OPEN] Skipped (${reason})`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: `Meteora: ${reason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: `Meteora: ${reason}`,
         });
         break;
       }
       if (config.meteoraCloseOnlyWallets.has(targetWallet.toBase58())) {
         logger.info(MODULE, `[${botLabel}][METEORA OPEN] Skipped (close-only target)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: 'Meteora close-only',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: 'Meteora close-only',
         });
         break;
       }
 
-      logger.info(MODULE, `[${botLabel}][METEORA OPEN] pool=${event.poolAddress.slice(0, 8)} bins=[${event.lowerBinId},${event.lowerBinId + event.width}] pos=${event.positionAddress.slice(0, 8)}`);
+      logger.info(
+        MODULE,
+        `[${botLabel}][METEORA OPEN] pool=${event.poolAddress.slice(0, 8)} bins=[${event.lowerBinId},${event.lowerBinId + event.width}] pos=${event.positionAddress.slice(0, 8)}`,
+      );
 
       if (meteoraExecutor.hasMapping(event.positionAddress)) {
         logger.info(MODULE, `[${botLabel}][METEORA OPEN] Already mapped, skipping`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: 'Meteora 重複目標',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: 'Meteora 重複目標',
         });
         break;
       }
@@ -1054,15 +1330,23 @@ async function handleEvent(
 
       if (ourSig === null && skipReason) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: `Meteora: ${skipReason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: `Meteora: ${skipReason}`,
         });
         break;
       }
 
       push({
-        ts: Date.now(), type: 'OPEN', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionAddress, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'OPEN',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionAddress,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: positionMap.getPool(event.positionAddress),
       });
       if (ourSig) {
@@ -1078,8 +1362,12 @@ async function handleEvent(
       if (meteoraExecutor.solPaused || meteoraExecutor.drawdownPaused) {
         logger.warn(MODULE, `[${botLabel}][METEORA ADD] Skipped (paused)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: 'Meteora paused',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: 'Meteora paused',
         });
         break;
       }
@@ -1091,16 +1379,27 @@ async function handleEvent(
 
       if (!meteoraExecutor.hasMapping(event.positionAddress)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: 'Meteora 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: 'Meteora 無映射',
         });
         break;
       }
 
-      const ourSig = await meteoraExecutor.copyAddLiquidity(event.positionAddress, targetWallet.toBase58());
+      const ourSig = await meteoraExecutor.copyAddLiquidity(
+        event.positionAddress,
+        targetWallet.toBase58(),
+      );
       push({
-        ts: Date.now(), type: 'INCREASE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionAddress, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'INCREASE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionAddress,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
       });
       if (ourSig) {
         logger.info(MODULE, `[${botLabel}][METEORA ADD] Our TX: ${ourSig}`);
@@ -1115,8 +1414,12 @@ async function handleEvent(
 
       if (!meteoraExecutor.hasMapping(event.positionAddress)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: 'Meteora 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: 'Meteora 無映射',
         });
         break;
       }
@@ -1124,8 +1427,12 @@ async function handleEvent(
       const result = await meteoraExecutor.copyRemoveLiquidity(event.positionAddress);
       const evtType = result?.type || 'DECREASE';
       push({
-        ts: Date.now(), type: evtType, targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionAddress, txSig: result?.txSig || undefined, success: !!result,
+        ts: Date.now(),
+        type: evtType,
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionAddress,
+        txSig: result?.txSig || undefined,
+        success: !!result,
       });
       if (result) {
         logger.info(MODULE, `[${botLabel}][METEORA ${evtType}] Our TX: ${result.txSig}`);
@@ -1142,8 +1449,12 @@ async function handleEvent(
 
       if (!meteoraExecutor.hasMapping(event.positionAddress)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: 'Meteora 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: 'Meteora 無映射',
         });
         break;
       }
@@ -1156,15 +1467,23 @@ async function handleEvent(
 
       if (ourSig === null && skipReason) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionAddress, success: true, error: `Meteora: ${skipReason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionAddress,
+          success: true,
+          error: `Meteora: ${skipReason}`,
         });
         break;
       }
 
       push({
-        ts: Date.now(), type: 'CLOSE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionAddress, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'CLOSE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionAddress,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: closePool,
       });
       if (ourSig) {
@@ -1186,16 +1505,24 @@ async function handleEvent(
         const reason = pcsExecutor.solPaused ? 'SOL 不足' : '資產跌幅暫停';
         logger.warn(MODULE, `[${botLabel}][PCS OPEN] Skipped (${reason})`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: `PCS: ${reason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: `PCS: ${reason}`,
         });
         break;
       }
       if (config.pcsCloseOnlyWallets.has(targetWallet.toBase58())) {
         logger.info(MODULE, `[${botLabel}][PCS OPEN] Skipped (close-only target)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS close-only',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS close-only',
         });
         break;
       }
@@ -1211,8 +1538,12 @@ async function handleEvent(
       if (openPoolMints && pcsExecutor.isTokenBlacklisted(openPoolMints)) {
         logger.warn(MODULE, `[${botLabel}][PCS OPEN] Skipped (黑名單代幣)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS 黑名單代幣',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS 黑名單代幣',
           pool: openPoolMints,
         });
         break;
@@ -1222,19 +1553,30 @@ async function handleEvent(
       if (openPoolMints && byrealExecutor.isTokenCoolingDown(openPoolMints)) {
         logger.warn(MODULE, `[${botLabel}][PCS OPEN] Skipped (代幣冷靜期)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS 代幣冷靜期',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS 代幣冷靜期',
           pool: openPoolMints,
         });
         break;
       }
 
-      logger.info(MODULE, `[${botLabel}][PCS OPEN] pool=${event.poolId.slice(0, 8)} nft=${event.positionNftMint.slice(0, 8)}`);
+      logger.info(
+        MODULE,
+        `[${botLabel}][PCS OPEN] pool=${event.poolId.slice(0, 8)} nft=${event.positionNftMint.slice(0, 8)}`,
+      );
 
       if (pcsExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS 重複目標',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS 重複目標',
         });
         break;
       }
@@ -1251,16 +1593,24 @@ async function handleEvent(
 
       if (ourSig === null && skipReason) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: `PCS: ${skipReason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: `PCS: ${skipReason}`,
           pool: positionMap.getPool(event.positionNftMint),
         });
         break;
       }
 
       push({
-        ts: Date.now(), type: 'OPEN', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'OPEN',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: positionMap.getPool(event.positionNftMint),
       });
       if (ourSig) {
@@ -1276,8 +1626,12 @@ async function handleEvent(
       if (pcsExecutor.solPaused || pcsExecutor.drawdownPaused) {
         logger.warn(MODULE, `[${botLabel}][PCS INCREASE] Skipped (paused)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS paused',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS paused',
         });
         break;
       }
@@ -1289,16 +1643,27 @@ async function handleEvent(
 
       if (!pcsExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS 無映射',
         });
         break;
       }
 
-      const ourSig = await pcsExecutor.copyIncreaseLiquidity(event.positionNftMint, targetWallet.toBase58());
+      const ourSig = await pcsExecutor.copyIncreaseLiquidity(
+        event.positionNftMint,
+        targetWallet.toBase58(),
+      );
       push({
-        ts: Date.now(), type: 'INCREASE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'INCREASE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
       });
       if (ourSig) {
         logger.info(MODULE, `[${botLabel}][PCS INCREASE] Our TX: ${ourSig}`);
@@ -1313,8 +1678,12 @@ async function handleEvent(
 
       if (!pcsExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS 無映射',
         });
         break;
       }
@@ -1322,8 +1691,12 @@ async function handleEvent(
       const result = await pcsExecutor.copyDecreaseLiquidity(event.positionNftMint);
       const evtType = result?.type || 'DECREASE';
       push({
-        ts: Date.now(), type: evtType, targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: result?.txSig || undefined, success: !!result,
+        ts: Date.now(),
+        type: evtType,
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: result?.txSig || undefined,
+        success: !!result,
       });
       if (result) {
         logger.info(MODULE, `[${botLabel}][PCS ${evtType}] Our TX: ${result.txSig}`);
@@ -1340,8 +1713,12 @@ async function handleEvent(
 
       if (!pcsExecutor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'PCS 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'PCS 無映射',
         });
         break;
       }
@@ -1349,8 +1726,12 @@ async function handleEvent(
       const closePool = positionMap.getPool(event.positionNftMint);
       const ourSig = await pcsExecutor.copyClosePosition(event.positionNftMint);
       push({
-        ts: Date.now(), type: 'CLOSE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'CLOSE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: closePool,
       });
       if (ourSig) {
@@ -1378,27 +1759,42 @@ async function handleEvent(
         const reason = dammv2Executor.solPaused ? 'SOL 不足' : '資產跌幅暫停';
         logger.warn(MODULE, `[${botLabel}][DAMMV2 OPEN] Skipped (${reason})`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: `DAMMV2: ${reason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: `DAMMV2: ${reason}`,
         });
         break;
       }
       if (config.dammv2CloseOnlyWallets.has(targetWallet.toBase58())) {
         logger.info(MODULE, `[${botLabel}][DAMMV2 OPEN] Skipped (close-only target)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'DAMMV2 close-only',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'DAMMV2 close-only',
         });
         break;
       }
 
-      logger.info(MODULE, `[${botLabel}][DAMMV2 OPEN] pool=${event.poolAddress.slice(0, 8)} nft=${event.positionNftMint.slice(0, 8)}`);
+      logger.info(
+        MODULE,
+        `[${botLabel}][DAMMV2 OPEN] pool=${event.poolAddress.slice(0, 8)} nft=${event.positionNftMint.slice(0, 8)}`,
+      );
 
       if (dammv2Executor.hasMapping(event.positionNftMint)) {
         logger.info(MODULE, `[${botLabel}][DAMMV2 OPEN] Already mapped, skipping`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'DAMMV2 重複目標',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'DAMMV2 重複目標',
         });
         break;
       }
@@ -1414,15 +1810,23 @@ async function handleEvent(
 
       if (ourSig === null && skipReason) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: `DAMMV2: ${skipReason}`,
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: `DAMMV2: ${skipReason}`,
         });
         break;
       }
 
       push({
-        ts: Date.now(), type: 'OPEN', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'OPEN',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: positionMap.getPool(event.positionNftMint),
       });
       if (ourSig) {
@@ -1438,8 +1842,12 @@ async function handleEvent(
       if (dammv2Executor.solPaused || dammv2Executor.drawdownPaused) {
         logger.warn(MODULE, `[${botLabel}][DAMMV2 ADD] Skipped (paused)`);
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'DAMMV2 paused',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'DAMMV2 paused',
         });
         break;
       }
@@ -1451,16 +1859,27 @@ async function handleEvent(
 
       if (!dammv2Executor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'DAMMV2 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'DAMMV2 無映射',
         });
         break;
       }
 
-      const ourSig = await dammv2Executor.copyAddLiquidity(event.positionNftMint, targetWallet.toBase58());
+      const ourSig = await dammv2Executor.copyAddLiquidity(
+        event.positionNftMint,
+        targetWallet.toBase58(),
+      );
       push({
-        ts: Date.now(), type: 'INCREASE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'INCREASE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
       });
       if (ourSig) {
         logger.info(MODULE, `[${botLabel}][DAMMV2 ADD] Our TX: ${ourSig}`);
@@ -1475,8 +1894,12 @@ async function handleEvent(
 
       if (!dammv2Executor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'DAMMV2 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'DAMMV2 無映射',
         });
         break;
       }
@@ -1484,8 +1907,12 @@ async function handleEvent(
       const result = await dammv2Executor.copyRemoveLiquidity(event.positionNftMint);
       const evtType = result?.type || 'DECREASE';
       push({
-        ts: Date.now(), type: evtType, targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: result?.txSig || undefined, success: !!result,
+        ts: Date.now(),
+        type: evtType,
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: result?.txSig || undefined,
+        success: !!result,
       });
       if (result) {
         logger.info(MODULE, `[${botLabel}][DAMMV2 ${evtType}] Our TX: ${result.txSig}`);
@@ -1502,8 +1929,12 @@ async function handleEvent(
 
       if (!dammv2Executor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'DAMMV2 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'DAMMV2 無映射',
         });
         break;
       }
@@ -1511,8 +1942,12 @@ async function handleEvent(
       const closePool = positionMap.getPool(event.positionNftMint);
       const ourSig = await dammv2Executor.copyClosePosition(event.positionNftMint);
       push({
-        ts: Date.now(), type: 'CLOSE', targetWallet: targetWallet.toBase58(),
-        targetNft: event.positionNftMint, txSig: ourSig || undefined, success: !!ourSig,
+        ts: Date.now(),
+        type: 'CLOSE',
+        targetWallet: targetWallet.toBase58(),
+        targetNft: event.positionNftMint,
+        txSig: ourSig || undefined,
+        success: !!ourSig,
         pool: closePool,
       });
       if (ourSig) {
@@ -1529,8 +1964,12 @@ async function handleEvent(
 
       if (!dammv2Executor.hasMapping(event.positionNftMint)) {
         push({
-          ts: Date.now(), type: 'SKIP', targetWallet: targetWallet.toBase58(),
-          targetNft: event.positionNftMint, success: true, error: 'DAMMV2 無映射',
+          ts: Date.now(),
+          type: 'SKIP',
+          targetWallet: targetWallet.toBase58(),
+          targetNft: event.positionNftMint,
+          success: true,
+          error: 'DAMMV2 無映射',
         });
         break;
       }
@@ -1550,7 +1989,7 @@ async function handleEvent(
   }
 }
 
-main().catch(err => {
+main().catch((err) => {
   logger.error(MODULE, `Fatal error: ${err.message}`);
   releaseLock();
   process.exit(1);

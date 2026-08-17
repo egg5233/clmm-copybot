@@ -38,11 +38,21 @@ interface TokenBalanceFixture {
   accountIndex: number;
   mint: string;
   owner: string;
-  uiTokenAmount: { amount: string; decimals: number; uiAmount: number | null; uiAmountString: string };
+  uiTokenAmount: {
+    amount: string;
+    decimals: number;
+    uiAmount: number | null;
+    uiAmountString: string;
+  };
 }
 
 /** Position NFT: decimals 0, amount 1 (held) or 0 (burned/emptied). */
-function nftBalance(accountIndex: number, mint: PublicKey, owner: PublicKey, held = true): TokenBalanceFixture {
+function nftBalance(
+  accountIndex: number,
+  mint: PublicKey,
+  owner: PublicKey,
+  held = true,
+): TokenBalanceFixture {
   return {
     accountIndex,
     mint: mint.toBase58(),
@@ -85,7 +95,7 @@ function ix(programId: string, accounts: PublicKey[], data = ''): unknown {
 function programLogs(programId: string, instructionNames: string[] = []): string[] {
   return [
     `Program ${programId} invoke [1]`,
-    ...instructionNames.map(name => `Program log: Instruction: ${name}`),
+    ...instructionNames.map((name) => `Program log: Instruction: ${name}`),
     `Program ${programId} success`,
   ];
 }
@@ -104,7 +114,11 @@ function memoLogs(referer: PublicKey): string[] {
  *   Token22: [2]nftMint [4]poolState [18]mintA [19]mintB
  *   V2:      [2]nftMint [5]poolState [20]mintA [21]mintB
  */
-function byrealOpenAccounts(opts: { token22: boolean; nftMint?: PublicKey; withMints?: boolean }): PublicKey[] {
+function byrealOpenAccounts(opts: {
+  token22: boolean;
+  nftMint?: PublicKey;
+  withMints?: boolean;
+}): PublicKey[] {
   const poolIdx = opts.token22 ? 4 : 5;
   const mintAIdx = opts.token22 ? 18 : 20;
   const mintBIdx = opts.token22 ? 19 : 21;
@@ -139,7 +153,7 @@ function makeTx(opts: {
     transaction: {
       signatures: ['test-signature'],
       message: {
-        accountKeys: accountKeys.map(pubkey => ({ pubkey, signer: true, writable: true })),
+        accountKeys: accountKeys.map((pubkey) => ({ pubkey, signer: true, writable: true })),
         instructions: opts.instructions ?? [],
         recentBlockhash: '11111111111111111111111111111111',
       },
@@ -149,7 +163,9 @@ function makeTx(opts: {
       fee: 5000,
       preBalances: opts.preBalances ?? accountKeys.map(() => 1_000_000_000),
       postBalances: opts.postBalances ?? accountKeys.map(() => 1_000_000_000),
-      innerInstructions: opts.innerInstructions ? [{ index: 0, instructions: opts.innerInstructions }] : [],
+      innerInstructions: opts.innerInstructions
+        ? [{ index: 0, instructions: opts.innerInstructions }]
+        : [],
       preTokenBalances: opts.pre ?? [],
       postTokenBalances: opts.post ?? [],
       logMessages: [],
@@ -208,7 +224,12 @@ describe('parseTransaction — Byreal CLMM', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(BYREAL, ['OpenPositionV2']), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['OpenPositionV2']),
+      TARGET,
+    );
 
     // Pool moves from index 4 to 5 and the vault mints from 18/19 to 20/21.
     expect(events).toHaveLength(1);
@@ -311,9 +332,16 @@ describe('parseTransaction — Byreal CLMM', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(BYREAL, ['IncreaseLiquidityV2']), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['IncreaseLiquidityV2']),
+      TARGET,
+    );
 
-    expect(events).toEqual([{ type: 'BYREAL_INCREASE_LIQUIDITY', positionNftMint: NFT_MINT.toBase58() }]);
+    expect(events).toEqual([
+      { type: 'BYREAL_INCREASE_LIQUIDITY', positionNftMint: NFT_MINT.toBase58() },
+    ]);
   });
 
   it('suppresses the increase event when the same TX also opens a position', async () => {
@@ -334,7 +362,10 @@ describe('parseTransaction — Byreal CLMM', () => {
 
     // The pre-held NFT would have produced an increase had open not taken priority.
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ type: 'BYREAL_OPEN_POSITION', positionNftMint: NFT_MINT.toBase58() });
+    expect(events[0]).toMatchObject({
+      type: 'BYREAL_OPEN_POSITION',
+      positionNftMint: NFT_MINT.toBase58(),
+    });
   });
 
   it('classifies DecreaseLiquidityV2 with the NFT still held as a partial decrease', async () => {
@@ -347,7 +378,12 @@ describe('parseTransaction — Byreal CLMM', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(BYREAL, ['DecreaseLiquidityV2']), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['DecreaseLiquidityV2']),
+      TARGET,
+    );
 
     expect(events).toEqual([
       { type: 'BYREAL_DECREASE_LIQUIDITY', positionNftMint: NFT_MINT.toBase58(), liquidity: '0' },
@@ -365,7 +401,12 @@ describe('parseTransaction — Byreal CLMM', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(BYREAL, ['DecreaseLiquidityV2']), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['DecreaseLiquidityV2']),
+      TARGET,
+    );
 
     expect(events).toEqual([
       { type: 'BYREAL_DECREASE_LIQUIDITY', positionNftMint: NFT_MINT.toBase58(), liquidity: '0' },
@@ -377,11 +418,19 @@ describe('parseTransaction — Byreal CLMM', () => {
       makeTx({
         instructions: [ix(BYREAL, byrealOpenAccounts({ token22: true }))],
         pre: [nftBalance(1, NFT_MINT, TARGET), tokenBalance(2, MINT_A, TARGET, '100', 6)],
-        post: [tokenBalance(2, MINT_A, TARGET, '1100', 6), tokenBalance(3, MINT_B, TARGET, '500', 9)],
+        post: [
+          tokenBalance(2, MINT_A, TARGET, '1100', 6),
+          tokenBalance(3, MINT_B, TARGET, '500', 9),
+        ],
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(BYREAL, ['ClosePosition']), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['ClosePosition']),
+      TARGET,
+    );
 
     expect(events).toEqual([
       {
@@ -404,7 +453,12 @@ describe('parseTransaction — Byreal CLMM', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(BYREAL, ['ClosePosition']), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['ClosePosition']),
+      TARGET,
+    );
 
     expect(events).toEqual([
       { type: 'BYREAL_CLOSE_POSITION', positionNftMint: NFT_MINT.toBase58(), receivedTokens: [] },
@@ -444,7 +498,12 @@ describe('parseTransaction — Byreal CLMM', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(BYREAL, ['DecreaseLiquidityV2']), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['DecreaseLiquidityV2']),
+      TARGET,
+    );
 
     // Balances alone look exactly like a swap; the Byreal branch must win.
     expect(events).toHaveLength(1);
@@ -530,7 +589,12 @@ describe('parseTransaction — routing and early exits', () => {
     vi.useFakeTimers();
     const { connection, fetched } = fakeConnection(null);
 
-    const pending = parseTransaction(connection, 'sig', programLogs(BYREAL, ['ClosePosition']), TARGET);
+    const pending = parseTransaction(
+      connection,
+      'sig',
+      programLogs(BYREAL, ['ClosePosition']),
+      TARGET,
+    );
     await vi.runAllTimersAsync();
 
     expect(await pending).toEqual([{ type: 'UNKNOWN' }]);
@@ -558,7 +622,9 @@ describe('parseTransaction — routing and early exits', () => {
       TARGET,
     );
 
-    expect(events).toEqual([{ type: 'BYREAL_INCREASE_LIQUIDITY', positionNftMint: NFT_MINT.toBase58() }]);
+    expect(events).toEqual([
+      { type: 'BYREAL_INCREASE_LIQUIDITY', positionNftMint: NFT_MINT.toBase58() },
+    ]);
   });
 
   it('attributes the shared close_position discriminator to DAMM v2 by program id', async () => {
@@ -566,7 +632,9 @@ describe('parseTransaction — routing and early exits', () => {
     // only the instruction's program id distinguishes them.
     const { connection } = fakeConnection(
       makeTx({
-        instructions: [ix(DAMMV2, [addr(300), NFT_MINT, addr(301), POOL], discData('7b86510031446262'))],
+        instructions: [
+          ix(DAMMV2, [addr(300), NFT_MINT, addr(301), POOL], discData('7b86510031446262')),
+        ],
         pre: [nftBalance(1, NFT_MINT, TARGET), tokenBalance(2, MINT_A, TARGET, '100', 6)],
         post: [tokenBalance(2, MINT_A, TARGET, '1100', 6)],
       }),
@@ -596,7 +664,12 @@ describe('parseTransaction — swap detection from balance deltas', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(FOREIGN_PROGRAM.toBase58()), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(FOREIGN_PROGRAM.toBase58()),
+      TARGET,
+    );
 
     expect(events).toEqual([
       {
@@ -624,7 +697,12 @@ describe('parseTransaction — swap detection from balance deltas', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(FOREIGN_PROGRAM.toBase58()), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(FOREIGN_PROGRAM.toBase58()),
+      TARGET,
+    );
 
     expect(events).toEqual([{ type: 'UNKNOWN' }]);
   });
@@ -633,11 +711,19 @@ describe('parseTransaction — swap detection from balance deltas', () => {
     const { connection } = fakeConnection(
       makeTx({
         pre: [nftBalance(1, NFT_MINT, TARGET), tokenBalance(2, MINT_B, TARGET, '0', 9)],
-        post: [nftBalance(1, NFT_MINT, TARGET, false), tokenBalance(2, MINT_B, TARGET, '250000000', 9)],
+        post: [
+          nftBalance(1, NFT_MINT, TARGET, false),
+          tokenBalance(2, MINT_B, TARGET, '250000000', 9),
+        ],
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(FOREIGN_PROGRAM.toBase58()), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(FOREIGN_PROGRAM.toBase58()),
+      TARGET,
+    );
 
     expect(events).toEqual([{ type: 'UNKNOWN' }]);
   });
@@ -652,7 +738,12 @@ describe('parseTransaction — swap detection from balance deltas', () => {
       }),
     );
 
-    const events = await parseTransaction(connection, 'sig', programLogs(FOREIGN_PROGRAM.toBase58()), TARGET);
+    const events = await parseTransaction(
+      connection,
+      'sig',
+      programLogs(FOREIGN_PROGRAM.toBase58()),
+      TARGET,
+    );
 
     expect(events).toEqual([{ type: 'UNKNOWN' }]);
   });

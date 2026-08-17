@@ -107,7 +107,9 @@ function askPasswordWeb(encrypted: any): Promise<string> {
 
       if (req.method === 'POST' && req.url === '/unlock') {
         let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('data', (chunk: Buffer) => {
+          body += chunk.toString();
+        });
         req.on('end', () => {
           try {
             const { password } = JSON.parse(body);
@@ -175,8 +177,12 @@ async function init() {
       askPasswordWeb(encrypted),
       (async () => {
         const pw = await askPasswordStdin();
-        try { return decryptKey(encrypted, pw); }
-        catch { log.error('Wrong password (stdin).'); return new Promise<string>(() => {}); }
+        try {
+          return decryptKey(encrypted, pw);
+        } catch {
+          log.error('Wrong password (stdin).');
+          return new Promise<string>(() => {});
+        }
       })(),
     ]);
   } else {
@@ -283,19 +289,21 @@ function startServer(keypair: Keypair) {
         buffer = buffer.slice(expectedLen);
         expectedLen = -1;
 
-        handleRequest(payload).then((response) => {
-          const lenBuf = Buffer.alloc(4);
-          lenBuf.writeUInt32BE(response.length, 0);
-          sock.write(lenBuf);
-          sock.write(response);
-        }).catch((err) => {
-          log.error(`Handler error: ${err.message}`);
-          const errResp = toResponse({ ok: false, error: 'Internal signer error' });
-          const lenBuf = Buffer.alloc(4);
-          lenBuf.writeUInt32BE(errResp.length, 0);
-          sock.write(lenBuf);
-          sock.write(errResp);
-        });
+        handleRequest(payload)
+          .then((response) => {
+            const lenBuf = Buffer.alloc(4);
+            lenBuf.writeUInt32BE(response.length, 0);
+            sock.write(lenBuf);
+            sock.write(response);
+          })
+          .catch((err) => {
+            log.error(`Handler error: ${err.message}`);
+            const errResp = toResponse({ ok: false, error: 'Internal signer error' });
+            const lenBuf = Buffer.alloc(4);
+            lenBuf.writeUInt32BE(errResp.length, 0);
+            sock.write(lenBuf);
+            sock.write(errResp);
+          });
       }
     });
 
@@ -305,7 +313,11 @@ function startServer(keypair: Keypair) {
   });
 
   server.listen(socketPath, () => {
-    try { fs.chmodSync(socketPath, 0o660); } catch { /* ignore */ }
+    try {
+      fs.chmodSync(socketPath, 0o660);
+    } catch {
+      /* ignore */
+    }
     log.info(`Signer service listening on ${socketPath}`);
     log.info(`Program allowlist: ${signerConfig.programAllowlist.size} programs`);
     log.info(`Destination whitelist: ${signerConfig.destinationWhitelist.size} addresses`);
@@ -314,7 +326,11 @@ function startServer(keypair: Keypair) {
   function shutdown() {
     log.info('Shutting down...');
     server.close();
-    try { if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath); } catch { /* ignore */ }
+    try {
+      if (fs.existsSync(socketPath)) fs.unlinkSync(socketPath);
+    } catch {
+      /* ignore */
+    }
     process.exit(0);
   }
 

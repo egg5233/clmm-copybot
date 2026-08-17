@@ -1,5 +1,10 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync, NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
+import {
+  getAssociatedTokenAddressSync,
+  NATIVE_MINT,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+} from '@solana/spl-token';
 import BN from 'bn.js';
 import {
   WhirlpoolContext,
@@ -18,8 +23,19 @@ import { getUserAddress, getWalletAdapter } from '../utils/wallet';
 import { scaleAmount, getAmountRatio } from '../utils/ratio';
 import { jupiterFetch } from '../utils/jupiter-api';
 import { PositionMap } from '../state/position-map';
-import { notifyOpenFailed, notifyCloseFailed, notifySolInsufficient, notifyPumpApproval, notifySwapFailed } from '../discord/notify';
-import { isPumpPending, isPumpApproved, isPumpRejected, addPumpPending } from '../state/pump-pending';
+import {
+  notifyOpenFailed,
+  notifyCloseFailed,
+  notifySolInsufficient,
+  notifyPumpApproval,
+  notifySwapFailed,
+} from '../discord/notify';
+import {
+  isPumpPending,
+  isPumpApproved,
+  isPumpRejected,
+  addPumpPending,
+} from '../state/pump-pending';
 import { swapForToken, getActualSwapOutput, lastSwapError, jupSwapExactIn } from './jupiter-swap';
 import { checkTokenLiquidity } from '../monitor/pool-tvl';
 import * as fs from 'fs';
@@ -87,11 +103,17 @@ export class OrcaPositionExecutor {
     this.readCtx = WhirlpoolContext.from(this.readConnection, wallet);
     this.readClient = buildWhirlpoolClient(this.readCtx);
 
-    this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+    this.getSolBalance()
+      .then((b) => {
+        this.cachedSolBalance = b;
+      })
+      .catch(() => {});
     logger.info(MODULE, 'OrcaPositionExecutor initialized');
   }
 
-  get isBusy(): boolean { return this.busy; }
+  get isBusy(): boolean {
+    return this.busy;
+  }
 
   /** Get a WhirlpoolClient backed by a free RPC (round-robin). Used for dashboard reads only. */
   private getFreeClient(): { ctx: WhirlpoolContext; client: WhirlpoolClient } {
@@ -173,7 +195,9 @@ export class OrcaPositionExecutor {
 
   private isTransientError(err: any): boolean {
     const msg = err?.message || '';
-    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(msg);
+    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(
+      msg,
+    );
   }
 
   private isRetryableSimError(err: any): boolean {
@@ -186,7 +210,9 @@ export class OrcaPositionExecutor {
       const raw = fs.readFileSync('./data/token-names.json', 'utf-8');
       const cache = JSON.parse(raw);
       return cache[mint]?.symbol || mint;
-    } catch { return mint; }
+    } catch {
+      return mint;
+    }
   }
 
   private async getPositionByNft(nftMint: PublicKey): Promise<Position | null> {
@@ -206,7 +232,7 @@ export class OrcaPositionExecutor {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) {
-          await new Promise(r => setTimeout(r, 3000 * attempt));
+          await new Promise((r) => setTimeout(r, 3000 * attempt));
         }
         const tx = await this.readConnection.getParsedTransaction(txSig, {
           maxSupportedTransactionVersion: 0,
@@ -214,14 +240,20 @@ export class OrcaPositionExecutor {
         });
         if (!tx?.meta) {
           if (attempt < 2) {
-            logger.debug(MODULE, `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`);
+            logger.debug(
+              MODULE,
+              `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`,
+            );
             continue;
           }
           logger.warn(MODULE, `verifyTxSuccess: TX not found after retries ${txSig.slice(0, 8)}`);
           return false;
         }
         if (tx.meta.err) {
-          logger.error(MODULE, `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`);
+          logger.error(
+            MODULE,
+            `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`,
+          );
           return false;
         }
         return true;
@@ -241,7 +273,10 @@ export class OrcaPositionExecutor {
    * Parse a confirmed TX to extract token balance changes for our wallet.
    * Returns positive changes only (tokens we received).
    */
-  private async parseTxTokenChanges(txSig: string, owner: PublicKey): Promise<{ mint: PublicKey; amount: BN }[]> {
+  private async parseTxTokenChanges(
+    txSig: string,
+    owner: PublicKey,
+  ): Promise<{ mint: PublicKey; amount: BN }[]> {
     try {
       const tx = await this.readConnection.getParsedTransaction(txSig, {
         maxSupportedTransactionVersion: 0,
@@ -282,7 +317,13 @@ export class OrcaPositionExecutor {
   /** Add to shared pending-swaps.json (same file as Byreal executor). */
   private addPendingSwap(mint: PublicKey, amount: BN): void {
     const mintStr = mint.toBase58();
-    if (mintStr === USDC || mintStr === USDT_MINT || mintStr === USDT_T22 || mint.equals(NATIVE_MINT)) return;
+    if (
+      mintStr === USDC ||
+      mintStr === USDT_MINT ||
+      mintStr === USDT_T22 ||
+      mint.equals(NATIVE_MINT)
+    )
+      return;
     if (amount.lte(new BN(0))) return;
 
     const data = this.readPendingFile();
@@ -291,7 +332,10 @@ export class OrcaPositionExecutor {
     const total = existing.add(amount);
     data[mintStr] = { ...entry, pending: total.toString() };
     this.writePendingFile(data);
-    logger.info(MODULE, `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`);
+    logger.info(
+      MODULE,
+      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`,
+    );
   }
 
   /**
@@ -309,7 +353,10 @@ export class OrcaPositionExecutor {
         if (sig) {
           logger.info(MODULE, `[SWAP-BACK] Success: ${mint} → USDC, tx=${sig}`);
         } else {
-          logger.warn(MODULE, `[SWAP-BACK] Jupiter returned null for ${mint}, tokens remain in wallet`);
+          logger.warn(
+            MODULE,
+            `[SWAP-BACK] Jupiter returned null for ${mint}, tokens remain in wallet`,
+          );
         }
       } catch (swapErr: any) {
         logger.warn(MODULE, `[SWAP-BACK] Failed for ${mint}: ${swapErr.message}`);
@@ -321,7 +368,11 @@ export class OrcaPositionExecutor {
    * Estimate how much inputMint (typically USDC) is needed to get outputAmount of outputMint.
    * Uses Jupiter probe quote. Returns null on failure (caller should skip pre-check, not block).
    */
-  private async estimateSwapCost(inputMint: string, outputMint: string, outputAmount: BN): Promise<BN | null> {
+  private async estimateSwapCost(
+    inputMint: string,
+    outputMint: string,
+    outputAmount: BN,
+  ): Promise<BN | null> {
     try {
       const probeParams = new URLSearchParams({
         inputMint,
@@ -331,14 +382,14 @@ export class OrcaPositionExecutor {
       });
       const res = await jupiterFetch(`${config.jupiterApiBase}/quote?${probeParams}`);
       if (!res.ok) return null;
-      const data = await res.json() as any;
+      const data = (await res.json()) as any;
       if (data.error || data.errorCode) return null;
       const probeIn = BigInt(data.inAmount);
       const probeOut = BigInt(data.outAmount);
       if (probeOut === 0n) return null;
       const needed = (BigInt(outputAmount.toString()) * probeIn) / probeOut;
       // Add 5% buffer for slippage
-      const withBuffer = needed * 105n / 100n;
+      const withBuffer = (needed * 105n) / 100n;
       return new BN(withBuffer.toString());
     } catch {
       return null;
@@ -380,9 +431,15 @@ export class OrcaPositionExecutor {
       ]);
       const totalLamports = rentMint + rentPosition + rentATA;
       this.rentPerPosition = totalLamports / 1e9;
-      logger.info(MODULE, `Rent per position: ${this.rentPerPosition} SOL (${totalLamports} lamports = Mint:${rentMint} + Pos:${rentPosition} + ATA:${rentATA})`);
+      logger.info(
+        MODULE,
+        `Rent per position: ${this.rentPerPosition} SOL (${totalLamports} lamports = Mint:${rentMint} + Pos:${rentPosition} + ATA:${rentATA})`,
+      );
     } catch (err: any) {
-      logger.warn(MODULE, `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`);
+      logger.warn(
+        MODULE,
+        `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`,
+      );
     }
   }
 
@@ -396,7 +453,10 @@ export class OrcaPositionExecutor {
       }
     }
     if (missing.length === 0) return;
-    logger.info(MODULE, `Backfilling lockedSol for ${missing.length} Orca positions (${this.rentPerPosition} SOL each)`);
+    logger.info(
+      MODULE,
+      `Backfilling lockedSol for ${missing.length} Orca positions (${this.rentPerPosition} SOL each)`,
+    );
     for (const targetNft of missing) {
       this.positionMap.setLockedSol(targetNft, this.rentPerPosition);
     }
@@ -413,7 +473,10 @@ export class OrcaPositionExecutor {
     const userAddress = getUserAddress();
 
     if (this.positionMap.get(targetNftMint)) {
-      logger.warn(MODULE, `Already have mapping for target NFT ${targetNftMint.slice(0, 8)}, skipping`);
+      logger.warn(
+        MODULE,
+        `Already have mapping for target NFT ${targetNftMint.slice(0, 8)}, skipping`,
+      );
       return null;
     }
 
@@ -452,14 +515,20 @@ export class OrcaPositionExecutor {
       let targetPosition = await this.getPositionByNft(new PublicKey(targetNftMint));
       if (!targetPosition) {
         for (let wait = 1; wait <= 3; wait++) {
-          logger.info(MODULE, `Target position not found yet, waiting ${wait * 2}s (attempt ${wait}/3)...`);
-          await new Promise(r => setTimeout(r, wait * 2000));
+          logger.info(
+            MODULE,
+            `Target position not found yet, waiting ${wait * 2}s (attempt ${wait}/3)...`,
+          );
+          await new Promise((r) => setTimeout(r, wait * 2000));
           targetPosition = await this.getPositionByNft(new PublicKey(targetNftMint));
           if (targetPosition) break;
         }
       }
       if (!targetPosition) {
-        logger.error(MODULE, `Cannot read target position after retries: ${targetNftMint.slice(0, 8)}`);
+        logger.error(
+          MODULE,
+          `Cannot read target position after retries: ${targetNftMint.slice(0, 8)}`,
+        );
         return null;
       }
 
@@ -485,8 +554,11 @@ export class OrcaPositionExecutor {
 
       // 4. Pump token filter (same tri-state as Byreal: off / full / discord)
       if (config.pumpFilterMode !== 'off') {
-        const pumpMint = mintAStr.toLowerCase().includes('pump') ? mintAStr
-          : mintBStr.toLowerCase().includes('pump') ? mintBStr : null;
+        const pumpMint = mintAStr.toLowerCase().includes('pump')
+          ? mintAStr
+          : mintBStr.toLowerCase().includes('pump')
+            ? mintBStr
+            : null;
         if (pumpMint) {
           if (!isPumpApproved(pumpMint)) {
             if (config.pumpFilterMode === 'full') {
@@ -502,8 +574,16 @@ export class OrcaPositionExecutor {
             }
             if (!isPumpPending(pumpMint)) {
               const symbol = this.getTokenSymbol(pumpMint);
-              addPumpPending({ mint: pumpMint, symbol, pool: poolLabel, targetWallet: targetWallet || '', detectedAt: Date.now() });
-              notifyPumpApproval(pumpMint, symbol, poolLabel).catch((e: any) => logger.warn(MODULE, `Pump notify failed: ${e.message}`));
+              addPumpPending({
+                mint: pumpMint,
+                symbol,
+                pool: poolLabel,
+                targetWallet: targetWallet || '',
+                detectedAt: Date.now(),
+              });
+              notifyPumpApproval(pumpMint, symbol, poolLabel).catch((e: any) =>
+                logger.warn(MODULE, `Pump notify failed: ${e.message}`),
+              );
             }
             logger.info(MODULE, `[OPEN] Skipped — pump token pending approval (${pumpMint})`);
             this.lastSkipReason = 'Pump 代幣等待確認';
@@ -515,12 +595,18 @@ export class OrcaPositionExecutor {
       // 5. Pool TVL filter
       if (config.minPoolTvl > 0) {
         const STABLES = new Set([USDC, USDT_MINT, USDT_T22]);
-        for (const [mint, label] of [[mintAStr, 'mintA'], [mintBStr, 'mintB']] as [string, string][]) {
+        for (const [mint, label] of [
+          [mintAStr, 'mintA'],
+          [mintBStr, 'mintB'],
+        ] as [string, string][]) {
           if (config.poolTvlWhitelist.has(mint)) continue;
           if (STABLES.has(mint) || mint === NATIVE_MINT.toBase58()) continue;
           const tvl = await checkTokenLiquidity(mint, () => getOrcaPoolTvl(poolAddress));
           if (tvl === null || tvl < config.minPoolTvl) {
-            logger.info(MODULE, `[OPEN] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`);
+            logger.info(
+              MODULE,
+              `[OPEN] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`,
+            );
             this.lastSkipReason = `TVL 不足 ($${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl})`;
             return null;
           }
@@ -530,7 +616,9 @@ export class OrcaPositionExecutor {
 
       // 6. Calculate deposit amount — scale TARGET's position size by ratio
       const tokenExtensionCtx = await TokenExtensionUtil.buildTokenExtensionContextForPool(
-        this.ctx.fetcher, mintA, mintB,
+        this.ctx.fetcher,
+        mintA,
+        mintB,
       );
 
       const targetLiquidity = posData.liquidity;
@@ -559,18 +647,26 @@ export class OrcaPositionExecutor {
       }
 
       logger.info(MODULE, `Target liquidity: ${targetLiquidity.toString()}, ratio: ${ratio}`);
-      logger.info(MODULE, `Our deposit target: tokenA=${ourTokenA.toString()}, tokenB=${ourTokenB.toString()}`);
+      logger.info(
+        MODULE,
+        `Our deposit target: tokenA=${ourTokenA.toString()}, tokenB=${ourTokenB.toString()}`,
+      );
 
       // 5a. Pre-swap: acquire tokens if insufficient
       let ourBalanceA = await this.getTokenBalance(userAddress, mintA);
       let ourBalanceB = await this.getTokenBalance(userAddress, mintB);
-      logger.info(MODULE, `Our balances before swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`);
+      logger.info(
+        MODULE,
+        `Our balances before swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`,
+      );
 
       // Pre-check: estimate total USDC cost before swapping to avoid wasting gas
       {
         let estimatedCost = 0n;
-        const deficitA = ourTokenA.gt(ourBalanceA) && !ourTokenA.isZero() ? ourTokenA.sub(ourBalanceA) : new BN(0);
-        const deficitB = ourTokenB.gt(ourBalanceB) && !ourTokenB.isZero() ? ourTokenB.sub(ourBalanceB) : new BN(0);
+        const deficitA =
+          ourTokenA.gt(ourBalanceA) && !ourTokenA.isZero() ? ourTokenA.sub(ourBalanceA) : new BN(0);
+        const deficitB =
+          ourTokenB.gt(ourBalanceB) && !ourTokenB.isZero() ? ourTokenB.sub(ourBalanceB) : new BN(0);
 
         if (!deficitA.isZero()) {
           if (mintAStr === USDC) {
@@ -591,11 +687,22 @@ export class OrcaPositionExecutor {
 
         if (estimatedCost > 0n) {
           // Reuse existing balance if one side is USDC, avoid extra RPC call
-          const usdcBalance = mintAStr === USDC ? ourBalanceA : mintBStr === USDC ? ourBalanceB : await this.getTokenBalance(userAddress, new PublicKey(USDC));
+          const usdcBalance =
+            mintAStr === USDC
+              ? ourBalanceA
+              : mintBStr === USDC
+                ? ourBalanceB
+                : await this.getTokenBalance(userAddress, new PublicKey(USDC));
           const usdcBal = BigInt(usdcBalance.toString());
-          logger.info(MODULE, `Pre-check: estimated USDC cost=${estimatedCost}, USDC balance=${usdcBal}`);
+          logger.info(
+            MODULE,
+            `Pre-check: estimated USDC cost=${estimatedCost}, USDC balance=${usdcBal}`,
+          );
           if (estimatedCost > usdcBal) {
-            logger.warn(MODULE, `Insufficient USDC for position: need ~${estimatedCost} but have ${usdcBal}, skipping`);
+            logger.warn(
+              MODULE,
+              `Insufficient USDC for position: need ~${estimatedCost} but have ${usdcBal}, skipping`,
+            );
             this.lastSkipReason = `USDC 不足 (需 ~${(Number(estimatedCost) / 1e6).toFixed(2)}, 有 ${(Number(usdcBal) / 1e6).toFixed(2)})`;
             return null;
           }
@@ -627,12 +734,17 @@ export class OrcaPositionExecutor {
           notifySwapFailed(mintAStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const addedA = await getActualSwapOutput(this.readConnection, txSig, mintAStr, userAddress.toBase58());
+        const addedA = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintAStr,
+          userAddress.toBase58(),
+        );
         if (addedA) {
           swappedTokens.push({ mint: mintAStr, amount: new BN(addedA) });
           ourBalanceA = ourBalanceA.add(new BN(addedA));
         } else {
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           const newBalA = await this.getTokenBalance(userAddress, mintA);
           const gained = newBalA.sub(ourBalanceA);
           if (gained.gt(new BN(0))) swappedTokens.push({ mint: mintAStr, amount: gained });
@@ -666,12 +778,17 @@ export class OrcaPositionExecutor {
           notifySwapFailed(mintBStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const addedB = await getActualSwapOutput(this.readConnection, txSig, mintBStr, userAddress.toBase58());
+        const addedB = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintBStr,
+          userAddress.toBase58(),
+        );
         if (addedB) {
           swappedTokens.push({ mint: mintBStr, amount: new BN(addedB) });
           ourBalanceB = ourBalanceB.add(new BN(addedB));
         } else {
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           const newBalB = await this.getTokenBalance(userAddress, mintB);
           const gained = newBalB.sub(ourBalanceB);
           if (gained.gt(new BN(0))) swappedTokens.push({ mint: mintBStr, amount: gained });
@@ -680,7 +797,10 @@ export class OrcaPositionExecutor {
         logger.info(MODULE, `tokenB after swap: ${ourBalanceB.toString()}`);
       }
 
-      logger.info(MODULE, `Balances after swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`);
+      logger.info(
+        MODULE,
+        `Balances after swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`,
+      );
 
       if (ourBalanceA.isZero() && ourBalanceB.isZero()) {
         logger.error(MODULE, 'No token balance for either side after swaps, cannot open position');
@@ -691,18 +811,26 @@ export class OrcaPositionExecutor {
       const MAX_OPEN_ATTEMPTS = 2;
       for (let openAttempt = 0; openAttempt < MAX_OPEN_ATTEMPTS; openAttempt++) {
         if (openAttempt > 0) {
-          logger.info(MODULE, `Retrying open position (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying open position (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
           ourBalanceA = await this.getTokenBalance(userAddress, mintA);
           ourBalanceB = await this.getTokenBalance(userAddress, mintB);
-          logger.info(MODULE, `Retry balances: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`);
+          logger.info(
+            MODULE,
+            `Retry balances: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`,
+          );
         }
 
         // Cap tokenMax to min(target, balance). For out-of-range positions where one side is 0,
         // pass wallet balance as max — the on-chain program only deposits 0 for the zero-side
         // regardless of tokenMax (verified via TX 2xgngkPM...). Passing 0 causes LiquidityZero.
-        const tokenMaxA = ourTokenA.isZero() && !ourTokenB.isZero() ? ourBalanceA : BN.min(ourTokenA, ourBalanceA);
-        const tokenMaxB = ourTokenB.isZero() && !ourTokenA.isZero() ? ourBalanceB : BN.min(ourTokenB, ourBalanceB);
+        const tokenMaxA =
+          ourTokenA.isZero() && !ourTokenB.isZero() ? ourBalanceA : BN.min(ourTokenA, ourBalanceA);
+        const tokenMaxB =
+          ourTokenB.isZero() && !ourTokenA.isZero() ? ourBalanceB : BN.min(ourTokenB, ourBalanceB);
 
         logger.info(MODULE, `Position params: ticks=[${tickLower}, ${tickUpper}]`, {
           tokenMaxA: tokenMaxA.toString(),
@@ -720,11 +848,12 @@ export class OrcaPositionExecutor {
 
           // Open position + increase liquidity
           const MAX_SQRT_PRICE = new BN('79226673515401279992447579055');
-          const result = await pool.openPosition(
-            tickLower,
-            tickUpper,
-            { tokenMaxA, tokenMaxB, minSqrtPrice: new BN(0), maxSqrtPrice: MAX_SQRT_PRICE },
-          );
+          const result = await pool.openPosition(tickLower, tickUpper, {
+            tokenMaxA,
+            tokenMaxB,
+            minSqrtPrice: new BN(0),
+            maxSqrtPrice: MAX_SQRT_PRICE,
+          });
           positionMint = result.positionMint;
 
           const txSig = await result.tx.buildAndExecute();
@@ -742,7 +871,10 @@ export class OrcaPositionExecutor {
           );
           this.positionMap.setLockedSol(targetNftMint, this.rentPerPosition);
           this.positionMap.setTargetLiquidity(targetNftMint, targetLiquidity.toString());
-          logger.info(MODULE, `Mapping saved: ${targetNftMint.slice(0, 8)} -> ${positionMint.toBase58().slice(0, 8)}`);
+          logger.info(
+            MODULE,
+            `Mapping saved: ${targetNftMint.slice(0, 8)} -> ${positionMint.toBase58().slice(0, 8)}`,
+          );
 
           return txSig;
         } catch (openErr: any) {
@@ -752,7 +884,10 @@ export class OrcaPositionExecutor {
             try {
               const checkPos = await this.getPositionByNft(positionMint);
               if (checkPos) {
-                logger.warn(MODULE, `buildAndExecute threw but position EXISTS on-chain: ${positionMint.toBase58().slice(0, 8)}, saving mapping`);
+                logger.warn(
+                  MODULE,
+                  `buildAndExecute threw but position EXISTS on-chain: ${positionMint.toBase58().slice(0, 8)}, saving mapping`,
+                );
                 this.positionMap.set(
                   targetNftMint,
                   positionMint.toBase58(),
@@ -771,8 +906,14 @@ export class OrcaPositionExecutor {
             }
           }
 
-          if (openAttempt < MAX_OPEN_ATTEMPTS - 1 && (this.isRetryableSimError(openErr) || this.isTransientError(openErr))) {
-            logger.warn(MODULE, `Open attempt ${openAttempt + 1} failed (${(openErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            openAttempt < MAX_OPEN_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(openErr) || this.isTransientError(openErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Open attempt ${openAttempt + 1} failed (${(openErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw openErr;
@@ -798,7 +939,11 @@ export class OrcaPositionExecutor {
       return null;
     } finally {
       this.release();
-      this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+      this.getSolBalance()
+        .then((b) => {
+          this.cachedSolBalance = b;
+        })
+        .catch(() => {});
     }
   }
 
@@ -826,7 +971,7 @@ export class OrcaPositionExecutor {
       for (let attempt = 0; attempt < MAX_CLOSE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
           logger.info(MODULE, `Retrying close (attempt ${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -842,11 +987,11 @@ export class OrcaPositionExecutor {
           const pool = await this.client.getPool(posData.whirlpool);
 
           // Close position (decrease all liquidity + collect fees + close)
-          const positionPda = PDAUtil.getPosition(ORCA_WHIRLPOOL_PROGRAM_ID, new PublicKey(myNftMint));
-          const txBuilders = await pool.closePosition(
-            positionPda.publicKey,
-            this.getSlippage(),
+          const positionPda = PDAUtil.getPosition(
+            ORCA_WHIRLPOOL_PROGRAM_ID,
+            new PublicKey(myNftMint),
           );
+          const txBuilders = await pool.closePosition(positionPda.publicKey, this.getSlippage());
 
           // Execute all transactions
           let lastSig = '';
@@ -856,8 +1001,14 @@ export class OrcaPositionExecutor {
           }
           txSig = lastSig;
         } catch (closeErr: any) {
-          if (attempt < MAX_CLOSE_ATTEMPTS - 1 && (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))) {
-            logger.warn(MODULE, `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_CLOSE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw closeErr;
@@ -871,11 +1022,17 @@ export class OrcaPositionExecutor {
 
         // On-chain failure — retry if attempts remain
         if (attempt < MAX_CLOSE_ATTEMPTS - 1) {
-          logger.warn(MODULE, `Close TX failed on-chain: ${txSig.slice(0, 8)}, retrying (${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`);
+          logger.warn(
+            MODULE,
+            `Close TX failed on-chain: ${txSig.slice(0, 8)}, retrying (${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`,
+          );
           txSig = null;
           continue;
         }
-        logger.error(MODULE, `Close TX failed on-chain after ${MAX_CLOSE_ATTEMPTS} attempts: ${txSig.slice(0, 8)}, keeping mapping`);
+        logger.error(
+          MODULE,
+          `Close TX failed on-chain after ${MAX_CLOSE_ATTEMPTS} attempts: ${txSig.slice(0, 8)}, keeping mapping`,
+        );
         notifyCloseFailed(myNftMint, 'on-chain failure after max attempts', MAX_CLOSE_ATTEMPTS);
         return null;
       }
@@ -888,13 +1045,19 @@ export class OrcaPositionExecutor {
       // Parse TX to get actual received amounts, queue as pending swaps
       const received = await this.parseTxTokenChanges(txSig, userAddress);
       for (const { mint, amount } of received) {
-        logger.info(MODULE, `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`);
+        logger.info(
+          MODULE,
+          `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`,
+        );
         this.addPendingSwap(mint, amount);
       }
 
       return txSig;
     } catch (err: any) {
-      logger.error(MODULE, `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`);
+      logger.error(
+        MODULE,
+        `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`,
+      );
       notifyCloseFailed(myNftMint, err, 0);
       return null;
     } finally {
@@ -910,7 +1073,10 @@ export class OrcaPositionExecutor {
     }
 
     if (this.solPaused || this.drawdownPaused) {
-      logger.info(MODULE, `[INCREASE] Skipped — paused (sol=${this.solPaused}, drawdown=${this.drawdownPaused})`);
+      logger.info(
+        MODULE,
+        `[INCREASE] Skipped — paused (sol=${this.solPaused}, drawdown=${this.drawdownPaused})`,
+      );
       return null;
     }
 
@@ -946,10 +1112,16 @@ export class OrcaPositionExecutor {
 
       // 2. Pump token filter (same as copyOpenPosition)
       if (config.pumpFilterMode !== 'off') {
-        const pumpMint = mintAStr.toLowerCase().includes('pump') ? mintAStr
-          : mintBStr.toLowerCase().includes('pump') ? mintBStr : null;
+        const pumpMint = mintAStr.toLowerCase().includes('pump')
+          ? mintAStr
+          : mintBStr.toLowerCase().includes('pump')
+            ? mintBStr
+            : null;
         if (pumpMint && !isPumpApproved(pumpMint)) {
-          logger.info(MODULE, `[INCREASE] Skipped — pump token ${config.pumpFilterMode === 'full' ? 'filtered' : 'not approved'} (${pumpMint})`);
+          logger.info(
+            MODULE,
+            `[INCREASE] Skipped — pump token ${config.pumpFilterMode === 'full' ? 'filtered' : 'not approved'} (${pumpMint})`,
+          );
           return null;
         }
       }
@@ -961,28 +1133,36 @@ export class OrcaPositionExecutor {
         const mAStr = poolInfo.tokenMintA.toBase58();
         const mBStr = poolInfo.tokenMintB.toBase58();
         const STABLES = new Set([USDC, USDT_MINT, USDT_T22]);
-        const checkMint = (!STABLES.has(mAStr) && mAStr !== NATIVE_MINT.toBase58()) ? mAStr : mBStr;
+        const checkMint = !STABLES.has(mAStr) && mAStr !== NATIVE_MINT.toBase58() ? mAStr : mBStr;
         const tvl = await checkTokenLiquidity(checkMint, () => getOrcaPoolTvl(poolAddr));
         if (tvl === null || tvl < config.minPoolTvl) {
-          logger.info(MODULE, `[INCREASE] Skipped — ${checkMint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`);
+          logger.info(
+            MODULE,
+            `[INCREASE] Skipped — ${checkMint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`,
+          );
           return null;
         }
       }
 
       // 3. Read target position to know how much they added
       // Wait briefly — RPC may not reflect the increase TX we just detected via WebSocket
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
 
       const tokenExtensionCtx = await TokenExtensionUtil.buildTokenExtensionContextForPool(
-        this.ctx.fetcher, mintA, mintB,
+        this.ctx.fetcher,
+        mintA,
+        mintB,
       );
 
       let deltaA = new BN(0);
       let deltaB = new BN(0);
       for (let readAttempt = 0; readAttempt < 2; readAttempt++) {
         if (readAttempt > 0) {
-          logger.info(MODULE, 'Delta ≤ 0 after detecting increase TX, waiting for RPC to catch up...');
-          await new Promise(r => setTimeout(r, 3000));
+          logger.info(
+            MODULE,
+            'Delta ≤ 0 after detecting increase TX, waiting for RPC to catch up...',
+          );
+          await new Promise((r) => setTimeout(r, 3000));
         }
 
         const targetPosition = await this.getPositionByNft(new PublicKey(targetNftMint));
@@ -1002,7 +1182,8 @@ export class OrcaPositionExecutor {
         const ourTokenA = scaleAmount(targetQuote.tokenEstA, targetWallet);
         const ourTokenB = scaleAmount(targetQuote.tokenEstB, targetWallet);
         // Re-read our position too (may have changed from previous increase)
-        const freshMyPosition = readAttempt > 0 ? await this.getPositionByNft(new PublicKey(myNftMint)) : myPosition;
+        const freshMyPosition =
+          readAttempt > 0 ? await this.getPositionByNft(new PublicKey(myNftMint)) : myPosition;
         const freshPosData = freshMyPosition ? freshMyPosition.getData() : posData;
         const myQuote = decreaseLiquidityQuoteByLiquidity(
           freshPosData.liquidity,
@@ -1018,7 +1199,10 @@ export class OrcaPositionExecutor {
       }
 
       if (deltaA.lte(new BN(0)) && deltaB.lte(new BN(0))) {
-        logger.info(MODULE, 'Our position already matches or exceeds target after retry, no increase needed');
+        logger.info(
+          MODULE,
+          'Our position already matches or exceeds target after retry, no increase needed',
+        );
         return null;
       }
 
@@ -1053,9 +1237,16 @@ export class OrcaPositionExecutor {
           notifySwapFailed(mintAStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const added = await getActualSwapOutput(this.readConnection, swapSig, mintAStr, userAddr.toBase58());
-        if (added) { balA = balA.add(new BN(added)); } else {
-          await new Promise(r => setTimeout(r, 5000));
+        const added = await getActualSwapOutput(
+          this.readConnection,
+          swapSig,
+          mintAStr,
+          userAddr.toBase58(),
+        );
+        if (added) {
+          balA = balA.add(new BN(added));
+        } else {
+          await new Promise((r) => setTimeout(r, 5000));
           balA = await this.getTokenBalance(userAddr, mintA);
         }
         logger.info(MODULE, `tokenA after swap: ${balA.toString()}`);
@@ -1083,9 +1274,16 @@ export class OrcaPositionExecutor {
           notifySwapFailed(mintBStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const added = await getActualSwapOutput(this.readConnection, swapSig, mintBStr, userAddr.toBase58());
-        if (added) { balB = balB.add(new BN(added)); } else {
-          await new Promise(r => setTimeout(r, 5000));
+        const added = await getActualSwapOutput(
+          this.readConnection,
+          swapSig,
+          mintBStr,
+          userAddr.toBase58(),
+        );
+        if (added) {
+          balB = balB.add(new BN(added));
+        } else {
+          await new Promise((r) => setTimeout(r, 5000));
           balB = await this.getTokenBalance(userAddr, mintB);
         }
         logger.info(MODULE, `tokenB after swap: ${balB.toString()}`);
@@ -1095,8 +1293,11 @@ export class OrcaPositionExecutor {
       const MAX_INCREASE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_INCREASE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Retrying increase (attempt ${attempt + 1}/${MAX_INCREASE_ATTEMPTS}), re-reading balances...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying increase (attempt ${attempt + 1}/${MAX_INCREASE_ATTEMPTS}), re-reading balances...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
           balA = await this.getTokenBalance(userAddr, mintA);
           balB = await this.getTokenBalance(userAddr, mintB);
           logger.info(MODULE, `Retry balances: A=${balA.toString()}, B=${balB.toString()}`);
@@ -1105,14 +1306,24 @@ export class OrcaPositionExecutor {
         // Cap tokenMax to min(delta, balance). For out-of-range positions where one delta is 0,
         // pass wallet balance as max — on-chain only deposits 0 for zero-side regardless of tokenMax.
         // Passing 0 causes LiquidityZero (0x177c).
-        const tokenMaxA = increaseA.isZero() && !increaseB.isZero() ? balA : BN.min(increaseA, balA);
-        const tokenMaxB = increaseB.isZero() && !increaseA.isZero() ? balB : BN.min(increaseB, balB);
+        const tokenMaxA =
+          increaseA.isZero() && !increaseB.isZero() ? balA : BN.min(increaseA, balA);
+        const tokenMaxB =
+          increaseB.isZero() && !increaseA.isZero() ? balB : BN.min(increaseB, balB);
 
-        logger.info(MODULE, `IncreaseLiquidity: tokenMaxA=${tokenMaxA.toString()}, tokenMaxB=${tokenMaxB.toString()}`);
+        logger.info(
+          MODULE,
+          `IncreaseLiquidity: tokenMaxA=${tokenMaxA.toString()}, tokenMaxB=${tokenMaxB.toString()}`,
+        );
 
         try {
           const MAX_SQRT_PRICE_INC = new BN('79226673515401279992447579055');
-          const tx = await myPosition.increaseLiquidity({ tokenMaxA, tokenMaxB, minSqrtPrice: new BN(0), maxSqrtPrice: MAX_SQRT_PRICE_INC });
+          const tx = await myPosition.increaseLiquidity({
+            tokenMaxA,
+            tokenMaxB,
+            minSqrtPrice: new BN(0),
+            maxSqrtPrice: MAX_SQRT_PRICE_INC,
+          });
           const txSig = await tx.buildAndExecute();
           logger.info(MODULE, `Liquidity increased: ${txSig}`);
 
@@ -1122,14 +1333,25 @@ export class OrcaPositionExecutor {
             if (updatedTarget) {
               const newTargetLiq = updatedTarget.getData().liquidity;
               this.positionMap.setTargetLiquidity(targetNftMint, newTargetLiq.toString());
-              logger.debug(MODULE, `Updated targetLiquidity after increase: ${newTargetLiq.toString()}`);
+              logger.debug(
+                MODULE,
+                `Updated targetLiquidity after increase: ${newTargetLiq.toString()}`,
+              );
             }
-          } catch { /* non-critical */ }
+          } catch {
+            /* non-critical */
+          }
 
           return txSig;
         } catch (incErr: any) {
-          if (attempt < MAX_INCREASE_ATTEMPTS - 1 && (this.isRetryableSimError(incErr) || this.isTransientError(incErr))) {
-            logger.warn(MODULE, `Increase attempt ${attempt + 1} failed (${(incErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_INCREASE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(incErr) || this.isTransientError(incErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Increase attempt ${attempt + 1} failed (${(incErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw incErr;
@@ -1145,7 +1367,9 @@ export class OrcaPositionExecutor {
     }
   }
 
-  async copyDecreaseLiquidity(targetNftMint: string): Promise<{ txSig: string; type: 'DECREASE' | 'COLLECT_FEE' } | null> {
+  async copyDecreaseLiquidity(
+    targetNftMint: string,
+  ): Promise<{ txSig: string; type: 'DECREASE' | 'COLLECT_FEE' } | null> {
     const myNftMint = this.positionMap.get(targetNftMint);
     if (!myNftMint) {
       logger.warn(MODULE, `No mapped position for target NFT: ${targetNftMint.slice(0, 8)}`);
@@ -1176,7 +1400,10 @@ export class OrcaPositionExecutor {
           const removedLiq = storedLiq.sub(targetCurrentLiq);
           const pctNumerator = removedLiq.mul(new BN(10000));
           const pctBps = pctNumerator.div(storedLiq).toNumber(); // basis points removed
-          logger.info(MODULE, `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`);
+          logger.info(
+            MODULE,
+            `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`,
+          );
 
           try {
             const myPosition = await this.getPositionByNft(new PublicKey(myNftMint));
@@ -1185,9 +1412,15 @@ export class OrcaPositionExecutor {
               // ourDecrease = myLiq * removedLiq / storedLiq
               decreaseAmount = myLiq.mul(removedLiq).div(storedLiq);
               if (decreaseAmount.isZero()) {
-                logger.info(MODULE, `Proportional decrease rounds to zero, collecting fees instead`);
+                logger.info(
+                  MODULE,
+                  `Proportional decrease rounds to zero, collecting fees instead`,
+                );
               } else {
-                logger.info(MODULE, `Our decrease: ${decreaseAmount.toString()} of ${myLiq.toString()}`);
+                logger.info(
+                  MODULE,
+                  `Our decrease: ${decreaseAmount.toString()} of ${myLiq.toString()}`,
+                );
               }
             }
           } catch (err: any) {
@@ -1198,12 +1431,18 @@ export class OrcaPositionExecutor {
           this.positionMap.setTargetLiquidity(targetNftMint, targetCurrentLiq.toString());
         } else {
           // Target liquidity >= stored — likely fee collection only (increase happened?)
-          logger.info(MODULE, `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`);
+          logger.info(
+            MODULE,
+            `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`,
+          );
           decreaseAmount = new BN(0);
         }
       } else {
         // No stored liquidity (old position) — can't calculate proportion, collect fees
-        logger.info(MODULE, `No stored targetLiquidity for ${targetNftMint.slice(0, 8)}, collecting fees (legacy position)`);
+        logger.info(
+          MODULE,
+          `No stored targetLiquidity for ${targetNftMint.slice(0, 8)}, collecting fees (legacy position)`,
+        );
         decreaseAmount = new BN(0);
       }
     }
@@ -1220,14 +1459,20 @@ export class OrcaPositionExecutor {
         const MAX_FEE_ATTEMPTS = 2;
         for (let attempt = 0; attempt < MAX_FEE_ATTEMPTS; attempt++) {
           if (attempt > 0) {
-            logger.info(MODULE, `Retrying collect fees (attempt ${attempt + 1}/${MAX_FEE_ATTEMPTS})...`);
-            await new Promise(r => setTimeout(r, 2000));
+            logger.info(
+              MODULE,
+              `Retrying collect fees (attempt ${attempt + 1}/${MAX_FEE_ATTEMPTS})...`,
+            );
+            await new Promise((r) => setTimeout(r, 2000));
           }
 
           try {
             const myPosition = await this.getPositionByNft(new PublicKey(myNftMint));
             if (!myPosition) {
-              logger.error(MODULE, `Cannot read our position for fee collection: ${myNftMint.slice(0, 8)}`);
+              logger.error(
+                MODULE,
+                `Cannot read our position for fee collection: ${myNftMint.slice(0, 8)}`,
+              );
               return null;
             }
             const tx = await myPosition.collectFees();
@@ -1235,8 +1480,14 @@ export class OrcaPositionExecutor {
             logger.info(MODULE, `Fees collected: ${txSig}`);
             return { txSig, type: 'COLLECT_FEE' };
           } catch (feeErr: any) {
-            if (attempt < MAX_FEE_ATTEMPTS - 1 && (this.isRetryableSimError(feeErr) || this.isTransientError(feeErr))) {
-              logger.warn(MODULE, `Collect fees attempt ${attempt + 1} failed (${(feeErr.message || '').slice(0, 100)}), will retry...`);
+            if (
+              attempt < MAX_FEE_ATTEMPTS - 1 &&
+              (this.isRetryableSimError(feeErr) || this.isTransientError(feeErr))
+            ) {
+              logger.warn(
+                MODULE,
+                `Collect fees attempt ${attempt + 1} failed (${(feeErr.message || '').slice(0, 100)}), will retry...`,
+              );
               continue;
             }
             throw feeErr;
@@ -1254,7 +1505,10 @@ export class OrcaPositionExecutor {
 
     // Decrease liquidity (full or proportional)
     const isPartial = decreaseAmount !== null;
-    logger.info(MODULE, `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myNftMint.slice(0, 8)}...`);
+    logger.info(
+      MODULE,
+      `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myNftMint.slice(0, 8)}...`,
+    );
 
     if (config.dryRun) {
       return { txSig: 'dry-run-orca-decrease', type: 'DECREASE' };
@@ -1266,8 +1520,11 @@ export class OrcaPositionExecutor {
       const MAX_DECREASE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_DECREASE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Retrying decrease (attempt ${attempt + 1}/${MAX_DECREASE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying decrease (attempt ${attempt + 1}/${MAX_DECREASE_ATTEMPTS})...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -1278,7 +1535,9 @@ export class OrcaPositionExecutor {
           }
 
           const posData = myPosition.getData();
-          const liquidityAmount = isPartial ? BN.min(decreaseAmount!, posData.liquidity) : posData.liquidity;
+          const liquidityAmount = isPartial
+            ? BN.min(decreaseAmount!, posData.liquidity)
+            : posData.liquidity;
 
           if (liquidityAmount.isZero()) {
             logger.info(MODULE, `Our position already has zero liquidity, collecting fees`);
@@ -1299,23 +1558,38 @@ export class OrcaPositionExecutor {
             tokenMinB: new BN(0),
           });
           const txSig = await tx.buildAndExecute();
-          logger.info(MODULE, `Liquidity decreased${isPartial ? ' (partial)' : ''} (position kept open): ${txSig}`);
+          logger.info(
+            MODULE,
+            `Liquidity decreased${isPartial ? ' (partial)' : ''} (position kept open): ${txSig}`,
+          );
 
           // Queue received tokens as pending swaps (same as close flow)
           try {
             const received = await this.parseTxTokenChanges(txSig, getUserAddress());
             for (const { mint, amount } of received) {
-              logger.info(MODULE, `Received from decrease: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`);
+              logger.info(
+                MODULE,
+                `Received from decrease: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`,
+              );
               this.addPendingSwap(mint, amount);
             }
           } catch (parseErr: any) {
-            logger.warn(MODULE, `Could not parse decrease TX for pending swaps: ${parseErr.message}`);
+            logger.warn(
+              MODULE,
+              `Could not parse decrease TX for pending swaps: ${parseErr.message}`,
+            );
           }
 
           return { txSig, type: 'DECREASE' };
         } catch (decErr: any) {
-          if (attempt < MAX_DECREASE_ATTEMPTS - 1 && (this.isRetryableSimError(decErr) || this.isTransientError(decErr))) {
-            logger.warn(MODULE, `Decrease attempt ${attempt + 1} failed (${(decErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_DECREASE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(decErr) || this.isTransientError(decErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Decrease attempt ${attempt + 1} failed (${(decErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw decErr;
@@ -1362,7 +1636,7 @@ export class OrcaPositionExecutor {
     // Use free RPC for dashboard reads (not Alchemy)
     const { ctx: freeCtx, client: freeClient } = this.getFreeClient();
 
-    const lpTotals = new Map<string, number>();  // mint → ui amount (liquidity)
+    const lpTotals = new Map<string, number>(); // mint → ui amount (liquidity)
     const feeTotals = new Map<string, number>(); // mint → ui amount (fees)
     const mintsNeeded = new Set<string>();
     let count = 0;
@@ -1386,14 +1660,18 @@ export class OrcaPositionExecutor {
         const mintBStr = mintB.toBase58();
 
         const tokenExtensionCtx = await TokenExtensionUtil.buildTokenExtensionContextForPool(
-          freeCtx.fetcher, mintA, mintB,
+          freeCtx.fetcher,
+          mintA,
+          mintB,
         );
 
         // Liquidity value
         const liqQuote = decreaseLiquidityQuoteByLiquidity(
           posData.liquidity,
           Percentage.fromFraction(0, 100),
-          pos, pool, tokenExtensionCtx,
+          pos,
+          pool,
+          tokenExtensionCtx,
         );
 
         // Unclaimed fees
@@ -1412,8 +1690,12 @@ export class OrcaPositionExecutor {
         const lpB = parseFloat(liqQuote.tokenEstB.toString()) / Math.pow(10, decB);
         // Guard: collectFeesQuote can produce overflow BN via subUnderflowU128 for freshly-opened positions
         const MAX_SANE_FEE = new BN('1000000000000000'); // 1e15 — no real fee exceeds this
-        const feeA = feeQuote.feeOwedA.gt(MAX_SANE_FEE) ? 0 : parseFloat(feeQuote.feeOwedA.toString()) / Math.pow(10, decA);
-        const feeB = feeQuote.feeOwedB.gt(MAX_SANE_FEE) ? 0 : parseFloat(feeQuote.feeOwedB.toString()) / Math.pow(10, decB);
+        const feeA = feeQuote.feeOwedA.gt(MAX_SANE_FEE)
+          ? 0
+          : parseFloat(feeQuote.feeOwedA.toString()) / Math.pow(10, decA);
+        const feeB = feeQuote.feeOwedB.gt(MAX_SANE_FEE)
+          ? 0
+          : parseFloat(feeQuote.feeOwedB.toString()) / Math.pow(10, decB);
 
         lpTotals.set(mintAStr, (lpTotals.get(mintAStr) || 0) + lpA);
         lpTotals.set(mintBStr, (lpTotals.get(mintBStr) || 0) + lpB);
@@ -1423,9 +1705,12 @@ export class OrcaPositionExecutor {
         mintsNeeded.add(mintBStr);
         count++;
       } catch (err: any) {
-        logger.debug(MODULE, `getOrcaLpValueUsd: error reading ${ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`);
+        logger.debug(
+          MODULE,
+          `getOrcaLpValueUsd: error reading ${ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`,
+        );
       }
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     if (mintsNeeded.size === 0) return { lpUsd: 0, feeUsd: 0, count: 0 };
@@ -1438,7 +1723,7 @@ export class OrcaPositionExecutor {
         headers: { 'x-api-key': config.jupApiKey },
       });
       if (res.ok) {
-        const json = await res.json() as any;
+        const json = (await res.json()) as any;
         for (const [mint, info] of Object.entries(json || {})) {
           const p = (info as any)?.usdPrice;
           if (p) prices[mint] = parseFloat(String(p));
@@ -1457,7 +1742,10 @@ export class OrcaPositionExecutor {
       feeUsd += amount * (prices[mint] || 0);
     }
 
-    logger.info(MODULE, `Orca LP: $${lpUsd.toFixed(2)} + fees $${feeUsd.toFixed(2)} (${count} positions)`);
+    logger.info(
+      MODULE,
+      `Orca LP: $${lpUsd.toFixed(2)} + fees $${feeUsd.toFixed(2)} (${count} positions)`,
+    );
     return { lpUsd: +lpUsd.toFixed(2), feeUsd: +feeUsd.toFixed(2), count };
   }
 
@@ -1465,9 +1753,27 @@ export class OrcaPositionExecutor {
    * Get per-mint aggregated position assets (same format as ByrealPositionExecutor.getPositionAssets).
    * Cached for 5 min.
    */
-  private _lpAssetsCache: { items: Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>; ts: number } | null = null;
+  private _lpAssetsCache: {
+    items: Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+    }>;
+    ts: number;
+  } | null = null;
 
-  public async getPositionAssets(): Promise<Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number; poolTvl?: number | null }>> {
+  public async getPositionAssets(): Promise<
+    Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+      poolTvl?: number | null;
+    }>
+  > {
     if (this._lpAssetsCache && Date.now() - this._lpAssetsCache.ts < 5 * 60 * 1000) {
       return this._lpAssetsCache.items;
     }
@@ -1484,7 +1790,16 @@ export class OrcaPositionExecutor {
     const { ctx: freeCtx, client: freeClient } = this.getFreeClient();
 
     // Aggregate per mint: balance (lp + fee), decimals, paired stable mint → amount
-    const totals = new Map<string, { balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number; poolTvl: number | null }>();
+    const totals = new Map<
+      string,
+      {
+        balance: number;
+        decimals: number;
+        pairedStable: Record<string, number>;
+        liquidityUsd: number;
+        poolTvl: number | null;
+      }
+    >();
     const mintsNeeded = new Set<string>();
 
     for (const { ourNft } of orcaEntries) {
@@ -1503,11 +1818,17 @@ export class OrcaPositionExecutor {
         const mintBStr = poolData.tokenMintB.toBase58();
 
         const tokenExtensionCtx = await TokenExtensionUtil.buildTokenExtensionContextForPool(
-          freeCtx.fetcher, poolData.tokenMintA, poolData.tokenMintB,
+          freeCtx.fetcher,
+          poolData.tokenMintA,
+          poolData.tokenMintB,
         );
 
         const liqQuote = decreaseLiquidityQuoteByLiquidity(
-          posData.liquidity, Percentage.fromFraction(0, 100), pos, pool, tokenExtensionCtx,
+          posData.liquidity,
+          Percentage.fromFraction(0, 100),
+          pos,
+          pool,
+          tokenExtensionCtx,
         );
 
         const decA = await this.getMintDecimals(poolData.tokenMintA, freeCtx.fetcher);
@@ -1520,14 +1841,26 @@ export class OrcaPositionExecutor {
         const poolTvl = await getOrcaPoolTvl(poolAddr);
 
         // Aggregate mintA
-        const eA = totals.get(mintAStr) || { balance: 0, decimals: decA, pairedStable: {}, liquidityUsd: 0, poolTvl: null };
+        const eA = totals.get(mintAStr) || {
+          balance: 0,
+          decimals: decA,
+          pairedStable: {},
+          liquidityUsd: 0,
+          poolTvl: null,
+        };
         eA.balance += lpA;
         eA.pairedStable[mintBStr] = (eA.pairedStable[mintBStr] || 0) + lpB;
         if (poolTvl !== null) eA.poolTvl = poolTvl;
         totals.set(mintAStr, eA);
 
         // Aggregate mintB
-        const eB = totals.get(mintBStr) || { balance: 0, decimals: decB, pairedStable: {}, liquidityUsd: 0, poolTvl: null };
+        const eB = totals.get(mintBStr) || {
+          balance: 0,
+          decimals: decB,
+          pairedStable: {},
+          liquidityUsd: 0,
+          poolTvl: null,
+        };
         eB.balance += lpB;
         eB.pairedStable[mintAStr] = (eB.pairedStable[mintAStr] || 0) + lpA;
         if (poolTvl !== null) eB.poolTvl = poolTvl;
@@ -1536,19 +1869,25 @@ export class OrcaPositionExecutor {
         mintsNeeded.add(mintAStr);
         mintsNeeded.add(mintBStr);
       } catch (err: any) {
-        logger.debug(MODULE, `getPositionAssets: error reading ${ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`);
+        logger.debug(
+          MODULE,
+          `getPositionAssets: error reading ${ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`,
+        );
       }
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     // Fetch prices for liquidityUsd
     if (mintsNeeded.size > 0 && config.jupApiKey) {
       try {
-        const res = await fetch(`https://api.jup.ag/price/v3?ids=${Array.from(mintsNeeded).join(',')}`, {
-          headers: { 'x-api-key': config.jupApiKey },
-        });
+        const res = await fetch(
+          `https://api.jup.ag/price/v3?ids=${Array.from(mintsNeeded).join(',')}`,
+          {
+            headers: { 'x-api-key': config.jupApiKey },
+          },
+        );
         if (res.ok) {
-          const json = await res.json() as any;
+          const json = (await res.json()) as any;
           for (const [mint, info] of Object.entries(json || {})) {
             const p = (info as any)?.usdPrice;
             if (p) {
@@ -1557,11 +1896,18 @@ export class OrcaPositionExecutor {
             }
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     const items = [...totals.entries()].map(([mint, d]) => ({
-      mint, balance: +d.balance.toFixed(6), decimals: d.decimals, pairedStable: d.pairedStable, liquidityUsd: +d.liquidityUsd.toFixed(2), poolTvl: d.poolTvl,
+      mint,
+      balance: +d.balance.toFixed(6),
+      decimals: d.decimals,
+      pairedStable: d.pairedStable,
+      liquidityUsd: +d.liquidityUsd.toFixed(2),
+      poolTvl: d.poolTvl,
     }));
     this._lpAssetsCache = { items, ts: Date.now() };
     return items;
@@ -1593,7 +1939,9 @@ export class OrcaPositionExecutor {
   }
 
   /** Reconcile Orca positions: check if target positions still exist, close ours if not. */
-  async reconcileOrcaPositions(queue: { enqueue: (label: string, priority: 'HIGH' | 'NORMAL', fn: () => Promise<void>) => void }): Promise<void> {
+  async reconcileOrcaPositions(queue: {
+    enqueue: (label: string, priority: 'HIGH' | 'NORMAL', fn: () => Promise<void>) => void;
+  }): Promise<void> {
     const entries = this.positionMap.entries();
     const orcaEntries: { tgtNft: string; ourNft: string }[] = [];
 
@@ -1615,18 +1963,27 @@ export class OrcaPositionExecutor {
           logger.info(MODULE, `Orca reconcile: target ${tgtNft.slice(0, 8)} gone, orphan detected`);
           orphans.push({ tgtNft, ourNft });
         } else if (targetPos.getData().liquidity.isZero()) {
-          logger.info(MODULE, `Orca reconcile: target ${tgtNft.slice(0, 8)} liquidity=0, orphan detected`);
+          logger.info(
+            MODULE,
+            `Orca reconcile: target ${tgtNft.slice(0, 8)} liquidity=0, orphan detected`,
+          );
           orphans.push({ tgtNft, ourNft });
         }
       } catch (err: any) {
         if (this.isTransientError(err)) {
-          logger.debug(MODULE, `Orca reconcile: RPC transient error for ${tgtNft.slice(0, 8)}, skipping`);
+          logger.debug(
+            MODULE,
+            `Orca reconcile: RPC transient error for ${tgtNft.slice(0, 8)}, skipping`,
+          );
         } else {
-          logger.info(MODULE, `Orca reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), treating as orphan`);
+          logger.info(
+            MODULE,
+            `Orca reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), treating as orphan`,
+          );
           orphans.push({ tgtNft, ourNft });
         }
       }
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     if (orphans.length === 0) {

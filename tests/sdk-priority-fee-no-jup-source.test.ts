@@ -42,7 +42,8 @@ function computeBudgetInstructions(
     const data = Buffer.from(ix.data);
     const entry: { type: number; limit?: number; price?: bigint } = { type: data[0] };
     if (data[0] === SET_COMPUTE_UNIT_LIMIT && data.length >= 5) entry.limit = data.readUInt32LE(1);
-    if (data[0] === SET_COMPUTE_UNIT_PRICE && data.length >= 9) entry.price = data.readBigUInt64LE(1);
+    if (data[0] === SET_COMPUTE_UNIT_PRICE && data.length >= 9)
+      entry.price = data.readBigUInt64LE(1);
     decoded.push(entry);
   }
   return decoded;
@@ -78,7 +79,9 @@ describe('makeByrealZeroPriorityTransaction', () => {
 
     const budget = computeBudgetInstructions(tx);
     expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_PRICE)).toEqual([]);
-    expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_LIMIT).map((ix) => ix.limit)).toEqual([266515]);
+    expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_LIMIT).map((ix) => ix.limit)).toEqual(
+      [266515],
+    );
   });
 
   it('prepends exactly one estimated limit when the SDK supplied none, and still adds no price', async () => {
@@ -90,9 +93,9 @@ describe('makeByrealZeroPriorityTransaction', () => {
 
     const budget = computeBudgetInstructions(tx);
     expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_PRICE)).toEqual([]);
-    expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_LIMIT).map((ix) => ix.limit)).toEqual([
-      SIMULATED_UNITS_CONSUMED + 100_000,
-    ]);
+    expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_LIMIT).map((ix) => ix.limit)).toEqual(
+      [SIMULATED_UNITS_CONSUMED + 100_000],
+    );
   });
 
   it('honours an explicit compute unit limit instead of simulating for one', async () => {
@@ -105,6 +108,8 @@ describe('makeByrealZeroPriorityTransaction', () => {
 
     const budget = computeBudgetInstructions(tx);
     expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_PRICE)).toEqual([]);
-    expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_LIMIT).map((ix) => ix.limit)).toEqual([200_000]);
+    expect(budget.filter((ix) => ix.type === SET_COMPUTE_UNIT_LIMIT).map((ix) => ix.limit)).toEqual(
+      [200_000],
+    );
   });
 });

@@ -12,7 +12,7 @@ const CHUNK_SIZE = 30; // max mints per API call (URL length safe)
 const CHUNK_INTERVAL_MS = 300; // 300ms between chunks to avoid 429
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ── Batch queue: concurrent callers are merged into one batch ───────────
@@ -40,7 +40,7 @@ async function flushBatch(): Promise<void> {
   pendingBatch = [];
   if (batch.length === 0) return;
 
-  const mintSet = new Set(batch.map(b => b.mint));
+  const mintSet = new Set(batch.map((b) => b.mint));
   const mints = Array.from(mintSet);
 
   try {
@@ -83,7 +83,9 @@ async function fetchBulk(mints: string[]): Promise<Map<string, number | null>> {
 
       if (res.status === 429) {
         await sleep(2000);
-        const retry = await fetch(`https://api.jup.ag/tokens/v2/search?query=${query}`, { headers });
+        const retry = await fetch(`https://api.jup.ag/tokens/v2/search?query=${query}`, {
+          headers,
+        });
         if (!retry.ok) {
           for (const m of chunk) results.set(m, null);
           continue;

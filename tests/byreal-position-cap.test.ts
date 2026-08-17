@@ -33,7 +33,15 @@ describe('Byreal open position counting', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'byreal-position-cap-'));
     const map = new PositionMap(path.join(dir, 'position-map.json'));
     map.set('target-byreal-legacy', 'our-byreal-legacy', 'A/B', 'wallet-a');
-    map.set('target-byreal-tagged', 'our-byreal-tagged', 'A/B', 'wallet-b', undefined, undefined, 'byreal');
+    map.set(
+      'target-byreal-tagged',
+      'our-byreal-tagged',
+      'A/B',
+      'wallet-b',
+      undefined,
+      undefined,
+      'byreal',
+    );
     map.set('target-orca', 'our-orca', 'A/B', 'wallet-c', undefined, undefined, 'orca');
     map.set('target-meteora', 'our-meteora', 'A/B', 'wallet-d', undefined, undefined, 'meteora');
     map.set('target-pcs', 'our-pcs', 'A/B', 'wallet-e', undefined, undefined, 'pancakeswap');

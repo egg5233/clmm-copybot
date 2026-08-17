@@ -30,7 +30,13 @@ let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 let lastClaimWeek = '';
 let claimHistory: ClaimHistoryEntry[] = [];
 
-function formatClaimResult(entry: { ts: number; snapshotTs?: number; totalPools: number; totalBonusUsd?: number; error?: string }): string {
+function formatClaimResult(entry: {
+  ts: number;
+  snapshotTs?: number;
+  totalPools: number;
+  totalBonusUsd?: number;
+  error?: string;
+}): string {
   if (entry.error && entry.totalPools === 0) return `失敗: ${entry.error}`;
 
   const d = new Date(entry.snapshotTs || entry.ts);
@@ -70,7 +76,9 @@ function loadClaimHistory(): void {
         }
       }
     }
-  } catch { /* start fresh */ }
+  } catch {
+    /* start fresh */
+  }
 }
 
 function saveClaimHistory(): void {
@@ -85,12 +93,16 @@ function saveClaimHistory(): void {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 type ByrealHttpMethod = 'GET' | 'POST';
 
-async function parseByrealJsonResponse(method: ByrealHttpMethod, apiPath: string, res: Response): Promise<any> {
+async function parseByrealJsonResponse(
+  method: ByrealHttpMethod,
+  apiPath: string,
+  res: Response,
+): Promise<any> {
   const text = await res.text();
   const preview = text.slice(0, 160);
   if (!res.ok) {
@@ -111,8 +123,8 @@ async function apiPost(apiPath: string, body: any): Promise<any> {
     headers: {
       'Content-Type': 'application/json',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': 'application/json',
-      'Referer': 'https://www.byreal.io/',
+      Accept: 'application/json',
+      Referer: 'https://www.byreal.io/',
     },
     body: JSON.stringify(body),
   });
@@ -123,8 +135,8 @@ async function apiGet(apiPath: string): Promise<any> {
   const res = await fetch(`${BYREAL_API}/${apiPath}`, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': 'application/json',
-      'Referer': 'https://www.byreal.io/',
+      Accept: 'application/json',
+      Referer: 'https://www.byreal.io/',
     },
   });
   return parseByrealJsonResponse('GET', apiPath, res);
@@ -140,10 +152,17 @@ type CopyBonusDeps = {
 
 function isCopyBonusTransientError(err: any): boolean {
   const message = String(err?.message || err || '');
-  return /\b(429|502|503|504)\b|Gateway Time-out|timeout|timed out|ECONNRESET|ETIMEDOUT/i.test(message);
+  return /\b(429|502|503|504)\b|Gateway Time-out|timeout|timed out|ECONNRESET|ETIMEDOUT/i.test(
+    message,
+  );
 }
 
-async function copyBonusPostWithRetry(deps: CopyBonusDeps, apiPath: string, body: any, context: string): Promise<any> {
+async function copyBonusPostWithRetry(
+  deps: CopyBonusDeps,
+  apiPath: string,
+  body: any,
+  context: string,
+): Promise<any> {
   const delays = [5000, 10000];
   let lastErr: any;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -153,7 +172,10 @@ async function copyBonusPostWithRetry(deps: CopyBonusDeps, apiPath: string, body
       lastErr = err;
       if (attempt >= 3 || !isCopyBonusTransientError(err)) throw err;
       const delay = delays[attempt - 1];
-      logger.warn(MODULE, `${context} transient failure attempt ${attempt}/3, retrying in ${delay}ms: ${err.message || err}`);
+      logger.warn(
+        MODULE,
+        `${context} transient failure attempt ${attempt}/3, retrying in ${delay}ms: ${err.message || err}`,
+      );
       await deps.sleep(delay);
     }
   }
@@ -166,7 +188,10 @@ const COPY_BONUS_ROUND_DELAY_MS = 5000;
  * 領取 type=2 複製獎勵 — 跟 byreal-cli 一致的流程：
  * 重複 encode-v2 → sign → order-v2 直到沒有東西可領
  */
-export async function claimCopyBonusWithDepsForTest(deps: CopyBonusDeps, nowMs = Date.now()): Promise<ClaimHistoryEntry> {
+export async function claimCopyBonusWithDepsForTest(
+  deps: CopyBonusDeps,
+  nowMs = Date.now(),
+): Promise<ClaimHistoryEntry> {
   const walletAddress = deps.getWalletAddress();
   const currentWeek = getISOWeek(new Date(nowMs));
 
@@ -197,10 +222,15 @@ export async function claimCopyBonusWithDepsForTest(deps: CopyBonusDeps, nowMs =
   for (let round = 1; ; round++) {
     let epochRes: any;
     try {
-      epochRes = await deps.apiGet(`copyfarmer/epoch-bonus?walletAddress=${encodeURIComponent(walletAddress)}&type=-1`);
+      epochRes = await deps.apiGet(
+        `copyfarmer/epoch-bonus?walletAddress=${encodeURIComponent(walletAddress)}&type=-1`,
+      );
     } catch (err: any) {
       if (entry.totalPools > 0) {
-        logger.warn(MODULE, `epoch-bonus unavailable after successful round: ${err.message || err}`);
+        logger.warn(
+          MODULE,
+          `epoch-bonus unavailable after successful round: ${err.message || err}`,
+        );
         break;
       }
       entry.error = `epoch-bonus unavailable: ${err.message || err}`;
@@ -218,7 +248,11 @@ export async function claimCopyBonusWithDepsForTest(deps: CopyBonusDeps, nowMs =
     const totalBonusUsd = Number(claimableEpoch.totalBonusUsd);
     const claimTime = Number(claimableEpoch.claimTime);
     const endTime = Number(claimableEpoch.endTime);
-    if (!Number.isFinite(totalBonusUsd) || !Number.isFinite(claimTime) || !Number.isFinite(endTime)) {
+    if (
+      !Number.isFinite(totalBonusUsd) ||
+      !Number.isFinite(claimTime) ||
+      !Number.isFinite(endTime)
+    ) {
       stopOrError('malformed epoch bonus data');
       break;
     }
@@ -240,16 +274,24 @@ export async function claimCopyBonusWithDepsForTest(deps: CopyBonusDeps, nowMs =
 
     try {
       logger.info(MODULE, `[Round ${round}] Calling encode-v2...`);
-      const encodeRes = await copyBonusPostWithRetry(deps, 'incentive/encode-v2', {
-        walletAddress,
-        positionAddresses: [],
-        type: 2,
-      }, 'copy-bonus encode-v2');
+      const encodeRes = await copyBonusPostWithRetry(
+        deps,
+        'incentive/encode-v2',
+        {
+          walletAddress,
+          positionAddresses: [],
+          type: 2,
+        },
+        'copy-bonus encode-v2',
+      );
 
       const encoded = getResponseData(encodeRes) || {};
       const items = encoded.rewardEncodeItems || [];
       const orderCode = encoded.orderCode;
-      logger.info(MODULE, `[Round ${round}] encode-v2: ${items.length} pools, orderCode=${orderCode}`);
+      logger.info(
+        MODULE,
+        `[Round ${round}] encode-v2: ${items.length} pools, orderCode=${orderCode}`,
+      );
 
       if (items.length === 0) {
         stopOrError('no rewards available');
@@ -262,7 +304,10 @@ export async function claimCopyBonusWithDepsForTest(deps: CopyBonusDeps, nowMs =
         return key && seenRewardKeys.has(key);
       });
       if (duplicateOrder || duplicateReward) {
-        logger.warn(MODULE, `[Round ${round}] duplicate copy bonus batch detected, stopping before order-v2`);
+        logger.warn(
+          MODULE,
+          `[Round ${round}] duplicate copy bonus batch detected, stopping before order-v2`,
+        );
         break;
       }
 
@@ -287,11 +332,18 @@ export async function claimCopyBonusWithDepsForTest(deps: CopyBonusDeps, nowMs =
 
       const orderBody = { orderCode, walletAddress, signedTxPayload };
       logger.info(MODULE, `[Round ${round}] Calling order-v2 (orderCode=${orderCode})...`);
-      const orderRes = await copyBonusPostWithRetry(deps, 'incentive/order-v2', orderBody, 'copy-bonus order-v2');
+      const orderRes = await copyBonusPostWithRetry(
+        deps,
+        'incentive/order-v2',
+        orderBody,
+        'copy-bonus order-v2',
+      );
 
       const orderData = getResponseData(orderRes) || {};
       const txList = Array.isArray(orderData.txList) ? orderData.txList : [];
-      const claimTokenList = Array.isArray(orderData.claimTokenList) ? orderData.claimTokenList : [];
+      const claimTokenList = Array.isArray(orderData.claimTokenList)
+        ? orderData.claimTokenList
+        : [];
 
       for (const tx of txList) {
         if (tx.txSignature) entry.txSignatures.push(tx.txSignature);
@@ -309,7 +361,10 @@ export async function claimCopyBonusWithDepsForTest(deps: CopyBonusDeps, nowMs =
         if (key) seenRewardKeys.add(key);
       }
 
-      logger.info(MODULE, `[Round ${round}] order-v2 done: txList=${txList.length}, claimTokenList=${claimTokenList.length}`);
+      logger.info(
+        MODULE,
+        `[Round ${round}] order-v2 done: txList=${txList.length}, claimTokenList=${claimTokenList.length}`,
+      );
       await deps.sleep(COPY_BONUS_ROUND_DELAY_MS);
     } catch (err: any) {
       entry.error = err.message || String(err);
@@ -372,7 +427,10 @@ async function _legacyClaimCopyBonusDisabled(): Promise<ClaimHistoryEntry> {
 
       const items = encodeRes?.result?.data?.rewardEncodeItems || [];
       const orderCode = encodeRes?.result?.data?.orderCode;
-      logger.info(MODULE, `[Round ${round}] encode-v2: ${items.length} pools, orderCode=${orderCode}`);
+      logger.info(
+        MODULE,
+        `[Round ${round}] encode-v2: ${items.length} pools, orderCode=${orderCode}`,
+      );
 
       if (items.length === 0) {
         if (round === 1) {
@@ -430,7 +488,10 @@ async function _legacyClaimCopyBonusDisabled(): Promise<ClaimHistoryEntry> {
         logger.info(MODULE, `  Claimed: ${t.tokenSymbol} ${t.tokenAmount}`);
       }
 
-      logger.info(MODULE, `[Round ${round}] order-v2 done: txList=${txList.length}, claimTokenList=${claimTokenList.length}`);
+      logger.info(
+        MODULE,
+        `[Round ${round}] order-v2 done: txList=${txList.length}, claimTokenList=${claimTokenList.length}`,
+      );
 
       // Wait before next round to let server process
       await sleep(5000);
@@ -480,7 +541,9 @@ export interface LpFeeClaimResult {
  *            (Byreal backend broadcasts; 1 sig is enough)
  * Returns on-chain sigs reported by Byreal after broadcast.
  */
-async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Promise<LpFeeClaimResult> {
+async function _legacyClaimLpFeesOffchainDisabled(
+  _connection: Connection,
+): Promise<LpFeeClaimResult> {
   const walletAddress = getUserAddress().toBase58();
   logger.info(MODULE, `=== 開始領取全部手續費 (offchain) wallet=${walletAddress.slice(0, 8)} ===`);
 
@@ -493,7 +556,9 @@ async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Prom
     claimedTokens: [],
   };
   const tokenTotals = new Map<string, { amount: number; decimals: number }>();
-  const bumpTokens = (tokens: Array<{ tokenSymbol: string; tokenAmount: number; tokenDecimals: number }>) => {
+  const bumpTokens = (
+    tokens: Array<{ tokenSymbol: string; tokenAmount: number; tokenDecimals: number }>,
+  ) => {
     for (const t of tokens) {
       const existing = tokenTotals.get(t.tokenSymbol) || { amount: 0, decimals: t.tokenDecimals };
       existing.amount += t.tokenAmount;
@@ -522,7 +587,10 @@ async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Prom
       });
       const items = encRes?.result?.data?.rewardEncodeItems || [];
       const orderCode = encRes?.result?.data?.orderCode;
-      logger.info(MODULE, `[encode-v3] round ${round}: ${items.length} items, orderCode=${orderCode}`);
+      logger.info(
+        MODULE,
+        `[encode-v3] round ${round}: ${items.length} items, orderCode=${orderCode}`,
+      );
       if (items.length === 0) break;
       result.encodeV3Rounds = round;
 
@@ -530,14 +598,21 @@ async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Prom
       for (const item of items) {
         const signedTx = await signOne(item.txPayload);
         if (!signedTx) {
-          result.failures.push({ phase: 'encode-v3', ref: item.txCode || item.poolAddress, error: 'sign failed' });
+          result.failures.push({
+            phase: 'encode-v3',
+            ref: item.txCode || item.poolAddress,
+            error: 'sign failed',
+          });
           logger.error(MODULE, `[encode-v3] sign failed for ${(item.txCode || '').slice(0, 8)}`);
           continue;
         }
         signedTxPayload.push({ poolAddress: item.poolAddress, signedTx, txCode: item.txCode });
         bumpTokens(item.rewardClaimInfo || []);
       }
-      if (signedTxPayload.length === 0) { await sleep(3000); continue; }
+      if (signedTxPayload.length === 0) {
+        await sleep(3000);
+        continue;
+      }
 
       try {
         const orderRes = await apiPost('incentive/' + 'order-v3', {
@@ -559,7 +634,11 @@ async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Prom
         logger.info(MODULE, `[order-v3] round ${round}: ${sigs.length} txs submitted`);
       } catch (err: any) {
         logger.error(MODULE, `[order-v3] round ${round} failed: ${err.message || err}`);
-        result.failures.push({ phase: 'encode-v3', ref: `order-v3-round-${round}`, error: err.message || String(err) });
+        result.failures.push({
+          phase: 'encode-v3',
+          ref: `order-v3-round-${round}`,
+          error: err.message || String(err),
+        });
       }
       await sleep(5000);
     }
@@ -581,7 +660,11 @@ async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Prom
       for (const item of items) {
         const signedTx = await signOne(item.txPayload);
         if (!signedTx) {
-          result.failures.push({ phase: 'encode-fee', ref: item.positionAddress, error: 'sign failed' });
+          result.failures.push({
+            phase: 'encode-fee',
+            ref: item.positionAddress,
+            error: 'sign failed',
+          });
           logger.error(MODULE, `[encode-fee] sign failed for ${item.positionAddress.slice(0, 8)}`);
           continue;
         }
@@ -589,17 +672,32 @@ async function _legacyClaimLpFeesOffchainDisabled(_connection: Connection): Prom
         refOrder.push(item.positionAddress);
         bumpTokens(item.tokens || []);
       }
-      if (signedBatch.length === 0) { await sleep(3000); continue; }
+      if (signedBatch.length === 0) {
+        await sleep(3000);
+        continue;
+      }
 
       try {
         const sendRes = await apiPost('liquidity/' + 'send', { data: signedBatch });
-        const sigs: string[] = (sendRes?.result?.data || []).filter((s: any) => typeof s === 'string');
+        const sigs: string[] = (sendRes?.result?.data || []).filter(
+          (s: any) => typeof s === 'string',
+        );
         result.txSignatures.push(...sigs);
         result.totalItems += sigs.length;
-        logger.info(MODULE, `[legacy backend send disabled] round ${round}: ${sigs.length}/${signedBatch.length} sigs returned`);
+        logger.info(
+          MODULE,
+          `[legacy backend send disabled] round ${round}: ${sigs.length}/${signedBatch.length} sigs returned`,
+        );
       } catch (err: any) {
-        logger.error(MODULE, `[legacy backend send disabled] round ${round} failed: ${err.message || err}`);
-        result.failures.push({ phase: 'encode-fee', ref: `send-round-${round}`, error: err.message || String(err) });
+        logger.error(
+          MODULE,
+          `[legacy backend send disabled] round ${round} failed: ${err.message || err}`,
+        );
+        result.failures.push({
+          phase: 'encode-fee',
+          ref: `send-round-${round}`,
+          error: err.message || String(err),
+        });
       }
       await sleep(5000);
     }
@@ -642,7 +740,14 @@ type ClaimDeps = {
 };
 
 function createLpFeeClaimResult(): LpFeeClaimResult {
-  return { rewardRounds: 0, feeRounds: 0, totalItems: 0, txSignatures: [], failures: [], claimedTokens: [] };
+  return {
+    rewardRounds: 0,
+    feeRounds: 0,
+    totalItems: 0,
+    txSignatures: [],
+    failures: [],
+    claimedTokens: [],
+  };
 }
 
 function getResponseData(res: any): any {
@@ -661,7 +766,10 @@ function addUniqueSignature(result: LpFeeClaimResult, seen: Set<string>, sig: st
   result.totalItems = result.txSignatures.length;
 }
 
-function addTokenTotals(totals: Map<string, { amount: number; decimals: number }>, tokens: ClaimTokenLike[] = []): void {
+function addTokenTotals(
+  totals: Map<string, { amount: number; decimals: number }>,
+  tokens: ClaimTokenLike[] = [],
+): void {
   for (const token of tokens) {
     const symbol = token.tokenSymbol || token.symbol;
     if (!symbol) continue;
@@ -682,13 +790,22 @@ function hasPositiveUnclaimedReward(item: any): boolean {
   return synced - locked - claimed > 0;
 }
 
-async function listActivePositionAddresses(walletAddress: string, deps: ClaimDeps): Promise<string[]> {
+async function listActivePositionAddresses(
+  walletAddress: string,
+  deps: ClaimDeps,
+): Promise<string[]> {
   const positions: string[] = [];
   const seen = new Set<string>();
   for (let page = 1; page <= 100; page++) {
-    const res = await deps.apiGet(`position/list?userAddress=${encodeURIComponent(walletAddress)}&page=${page}&pageSize=100&status=0`);
+    const res = await deps.apiGet(
+      `position/list?userAddress=${encodeURIComponent(walletAddress)}&page=${page}&pageSize=100&status=0`,
+    );
     const data = getResponseData(res) || {};
-    const rows = Array.isArray(data.positions) ? data.positions : (Array.isArray(data.records) ? data.records : []);
+    const rows = Array.isArray(data.positions)
+      ? data.positions
+      : Array.isArray(data.records)
+        ? data.records
+        : [];
     if (rows.length === 0) break;
     for (const row of rows) {
       const positionAddress = row?.positionAddress;
@@ -703,7 +820,10 @@ async function listActivePositionAddresses(walletAddress: string, deps: ClaimDep
   return positions;
 }
 
-export async function claimLpFeesCliParityForTest(connection: Connection, deps: ClaimDeps): Promise<LpFeeClaimResult> {
+export async function claimLpFeesCliParityForTest(
+  connection: Connection,
+  deps: ClaimDeps,
+): Promise<LpFeeClaimResult> {
   const walletAddress = deps.getWalletAddress();
   const result = createLpFeeClaimResult();
   const tokenTotals = new Map<string, { amount: number; decimals: number }>();
@@ -714,9 +834,15 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
     for (let round = 1; round <= 100; round++) {
       let unclaimedRes: any;
       try {
-        unclaimedRes = await deps.apiGet(`position/unclaimed-data?userAddress=${encodeURIComponent(walletAddress)}`);
+        unclaimedRes = await deps.apiGet(
+          `position/unclaimed-data?userAddress=${encodeURIComponent(walletAddress)}`,
+        );
       } catch (err: any) {
-        result.failures.push({ phase: 'reward-query', ref: `round-${round}`, error: err.message || String(err) });
+        result.failures.push({
+          phase: 'reward-query',
+          ref: `round-${round}`,
+          error: err.message || String(err),
+        });
         break;
       }
       const data = getResponseData(unclaimedRes) || {};
@@ -724,17 +850,29 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
         ...(Array.isArray(data.unclaimedOpenIncentives) ? data.unclaimedOpenIncentives : []),
         ...(Array.isArray(data.unclaimedClosedIncentives) ? data.unclaimedClosedIncentives : []),
       ];
-      const positionAddresses = [...new Set(rewards
-        .filter(hasPositiveUnclaimedReward)
-        .map((item: any) => item.positionAddress)
-        .filter((addr: string) => addr && !processedRewardPositions.has(addr)))];
+      const positionAddresses = [
+        ...new Set(
+          rewards
+            .filter(hasPositiveUnclaimedReward)
+            .map((item: any) => item.positionAddress)
+            .filter((addr: string) => addr && !processedRewardPositions.has(addr)),
+        ),
+      ];
       if (positionAddresses.length === 0) break;
 
       let encodeRes: any;
       try {
-        encodeRes = await deps.apiPost('incentive/encode-v2', { walletAddress, positionAddresses, type: 1 });
+        encodeRes = await deps.apiPost('incentive/encode-v2', {
+          walletAddress,
+          positionAddresses,
+          type: 1,
+        });
       } catch (err: any) {
-        result.failures.push({ phase: 'reward-encode', ref: `round-${round}`, error: err.message || String(err) });
+        result.failures.push({
+          phase: 'reward-encode',
+          ref: `round-${round}`,
+          error: err.message || String(err),
+        });
         break;
       }
       const encoded = getResponseData(encodeRes) || {};
@@ -752,18 +890,28 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
             signedTx: await deps.signRewardPayload(item.txPayload),
           });
         } catch (err: any) {
-          result.failures.push({ phase: 'reward-sign', ref: item.txCode || item.poolAddress || `round-${round}`, error: err.message || String(err) });
+          result.failures.push({
+            phase: 'reward-sign',
+            ref: item.txCode || item.poolAddress || `round-${round}`,
+            error: err.message || String(err),
+          });
         }
       }
       if (signedTxPayload.length === 0) break;
 
       try {
-        const orderRes = await deps.apiPost('incentive/order-v2', { orderCode, walletAddress, signedTxPayload });
+        const orderRes = await deps.apiPost('incentive/order-v2', {
+          orderCode,
+          walletAddress,
+          signedTxPayload,
+        });
         const orderData = getResponseData(orderRes) || {};
-        for (const tx of (Array.isArray(orderData.txList) ? orderData.txList : [])) {
+        for (const tx of Array.isArray(orderData.txList) ? orderData.txList : []) {
           addUniqueSignature(result, seenSignatures, extractSignature(tx));
         }
-        const claimTokenList = Array.isArray(orderData.claimTokenList) ? orderData.claimTokenList : [];
+        const claimTokenList = Array.isArray(orderData.claimTokenList)
+          ? orderData.claimTokenList
+          : [];
         if (claimTokenList.length > 0) {
           addTokenTotals(tokenTotals, claimTokenList);
         } else {
@@ -771,7 +919,11 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
         }
         for (const address of positionAddresses) processedRewardPositions.add(address);
       } catch (err: any) {
-        result.failures.push({ phase: 'reward-order', ref: orderCode || `round-${round}`, error: err.message || String(err) });
+        result.failures.push({
+          phase: 'reward-order',
+          ref: orderCode || `round-${round}`,
+          error: err.message || String(err),
+        });
         break;
       }
     }
@@ -780,16 +932,27 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
     try {
       positionAddresses = await listActivePositionAddresses(walletAddress, deps);
     } catch (err: any) {
-      result.failures.push({ phase: 'fee-list', ref: walletAddress, error: err.message || String(err) });
+      result.failures.push({
+        phase: 'fee-list',
+        ref: walletAddress,
+        error: err.message || String(err),
+      });
     }
 
     if (positionAddresses.length > 0) {
       let feeEntries: FeeClaimEntry[] = [];
       try {
-        const feeRes = await deps.apiPost('incentive/encode-fee', { walletAddress, positionAddresses });
+        const feeRes = await deps.apiPost('incentive/encode-fee', {
+          walletAddress,
+          positionAddresses,
+        });
         feeEntries = getResponseData(feeRes) || [];
       } catch (err: any) {
-        result.failures.push({ phase: 'fee-encode', ref: walletAddress, error: err.message || String(err) });
+        result.failures.push({
+          phase: 'fee-encode',
+          ref: walletAddress,
+          error: err.message || String(err),
+        });
       }
       if (feeEntries.length > 0) result.feeRounds = 1;
       const sentPositions = new Set<string>();
@@ -801,7 +964,11 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
           addUniqueSignature(result, seenSignatures, sig);
           addTokenTotals(tokenTotals, entry.tokens || []);
         } catch (err: any) {
-          result.failures.push({ phase: 'fee-send', ref: entry.positionAddress, error: err.message || String(err) });
+          result.failures.push({
+            phase: 'fee-send',
+            ref: entry.positionAddress,
+            error: err.message || String(err),
+          });
         }
       }
     }
@@ -809,7 +976,11 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
     result.failures.push({ phase: 'fatal', ref: 'claimLpFees', error: err.message || String(err) });
   }
 
-  result.claimedTokens = [...tokenTotals.entries()].map(([symbol, { amount, decimals }]) => ({ symbol, amount, decimals }));
+  result.claimedTokens = [...tokenTotals.entries()].map(([symbol, { amount, decimals }]) => ({
+    symbol,
+    amount,
+    decimals,
+  }));
   result.totalItems = result.txSignatures.length;
   return result;
 }
@@ -817,17 +988,25 @@ export async function claimLpFeesCliParityForTest(connection: Connection, deps: 
 export async function sendSignedFeePayloadForTest(
   connection: any,
   txPayload: string,
-  signPayload: (txPayload: string) => Promise<{ serialize: () => Buffer | Uint8Array; message: { recentBlockhash: string } }>,
+  signPayload: (
+    txPayload: string,
+  ) => Promise<{ serialize: () => Buffer | Uint8Array; message: { recentBlockhash: string } }>,
   skipPreflight: boolean,
 ): Promise<string> {
   const signed = await signPayload(txPayload);
-  const signature = await connection.sendRawTransaction(signed.serialize(), { skipPreflight, maxRetries: 3 });
+  const signature = await connection.sendRawTransaction(signed.serialize(), {
+    skipPreflight,
+    maxRetries: 3,
+  });
   const latest = await connection.getLatestBlockhash('confirmed');
-  const confirm = await connection.confirmTransaction({
-    signature,
-    blockhash: signed.message.recentBlockhash,
-    lastValidBlockHeight: latest.lastValidBlockHeight,
-  }, 'confirmed');
+  const confirm = await connection.confirmTransaction(
+    {
+      signature,
+      blockhash: signed.message.recentBlockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+    },
+    'confirmed',
+  );
   if (confirm?.value?.err) {
     throw new Error(`Transaction confirmed but failed: ${JSON.stringify(confirm.value.err)}`);
   }
@@ -841,10 +1020,15 @@ async function signRewardPayload(txPayload: string): Promise<string> {
 }
 
 async function sendFeePayload(connection: Connection, entry: FeeClaimEntry): Promise<string> {
-  return sendSignedFeePayloadForTest(connection, entry.txPayload, async (txPayload) => {
-    const tx = VersionedTransaction.deserialize(Buffer.from(txPayload, 'base64'));
-    return signVersioned(tx);
-  }, config.skipPreflight);
+  return sendSignedFeePayloadForTest(
+    connection,
+    entry.txPayload,
+    async (txPayload) => {
+      const tx = VersionedTransaction.deserialize(Buffer.from(txPayload, 'base64'));
+      return signVersioned(tx);
+    },
+    config.skipPreflight,
+  );
 }
 
 export async function claimLpFeesOffchain(connection: Connection): Promise<LpFeeClaimResult> {
@@ -857,7 +1041,10 @@ export async function claimLpFeesOffchain(connection: Connection): Promise<LpFee
     signRewardPayload,
     sendFeePayload,
   });
-  logger.info(MODULE, `=== Claim finished: ${result.totalItems} txs, ${result.failures.length} failures ===`);
+  logger.info(
+    MODULE,
+    `=== Claim finished: ${result.totalItems} txs, ${result.failures.length} failures ===`,
+  );
   return result;
 }
 
@@ -870,7 +1057,10 @@ function finalize(entry: ClaimHistoryEntry, currentWeek: string): void {
 
   if (!entry.error) lastClaimWeek = currentWeek;
 
-  logger.info(MODULE, `=== 領取完畢: ${entry.totalPools} pools, ${entry.txSignatures.length} txs ===`);
+  logger.info(
+    MODULE,
+    `=== 領取完畢: ${entry.totalPools} pools, ${entry.txSignatures.length} txs ===`,
+  );
 }
 
 // --- Scheduler ---
@@ -905,7 +1095,7 @@ function scheduleNextClaim(): void {
       logger.info(MODULE, `本週已領取 (week=${week})，跳過`);
     } else {
       logger.info(MODULE, `排程觸發：週二 16:30 台灣時間`);
-      claimCopyBonus().catch(err => {
+      claimCopyBonus().catch((err) => {
         logger.error(MODULE, `Auto-claim error: ${err.message}`);
       });
     }

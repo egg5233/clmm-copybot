@@ -10,10 +10,12 @@ export function shouldIgnoreRefererBlocker(
 ): boolean {
   const blocker = typeof blockerTargetWallet === 'string' ? blockerTargetWallet.trim() : '';
   const candidate = candidateTargetWallet.trim();
-  return blocker.length > 0
-    && candidate.length > 0
-    && blocker !== candidate
-    && (allowOpenedByWallets.has(blocker) || allowOpenAfterOthersWallets.has(candidate));
+  return (
+    blocker.length > 0 &&
+    candidate.length > 0 &&
+    blocker !== candidate &&
+    (allowOpenedByWallets.has(blocker) || allowOpenAfterOthersWallets.has(candidate))
+  );
 }
 
 export function isRefererDuplicateEntry(
@@ -29,12 +31,14 @@ export function isRefererDuplicateEntry(
   if (allowSameWalletReopen && blockerTargetWallet === candidateTargetWallet) {
     return false;
   }
-  if (shouldIgnoreRefererBlocker(
-    blockerTargetWallet,
-    candidateTargetWallet,
-    allowOpenedByWallets,
-    allowOpenAfterOthersWallets,
-  )) {
+  if (
+    shouldIgnoreRefererBlocker(
+      blockerTargetWallet,
+      candidateTargetWallet,
+      allowOpenedByWallets,
+      allowOpenAfterOthersWallets,
+    )
+  ) {
     return false;
   }
   return true;
@@ -44,7 +48,7 @@ export function normalizeByrealAllowSameTickWallets(
   inputWallets: unknown,
   byrealTargetWallets: Iterable<string>,
 ): Set<string> {
-  const targetSet = new Set(Array.from(byrealTargetWallets, w => w.trim()).filter(Boolean));
+  const targetSet = new Set(Array.from(byrealTargetWallets, (w) => w.trim()).filter(Boolean));
   const out = new Set<string>();
   if (!Array.isArray(inputWallets)) return out;
 
@@ -56,7 +60,12 @@ export function normalizeByrealAllowSameTickWallets(
 }
 
 export function parseWalletSet(raw: string): Set<string> {
-  return new Set(raw.split(',').map(s => s.trim()).filter(Boolean));
+  return new Set(
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 }
 
 export function serializeWalletSet(wallets: Iterable<string>): string {

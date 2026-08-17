@@ -92,8 +92,11 @@ export class OperationQueue {
   async executeNow<T>(label: string, fn: () => Promise<T>): Promise<T> {
     // Wait for any currently running item to finish
     while (this.running) {
-      logger.info(MODULE, `executeNow(${label}): waiting for running item "${this.running.label}" to finish...`);
-      await new Promise(r => setTimeout(r, 200));
+      logger.info(
+        MODULE,
+        `executeNow(${label}): waiting for running item "${this.running.label}" to finish...`,
+      );
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     // Block queue draining while we run
@@ -113,17 +116,29 @@ export class OperationQueue {
   /** Get current queue status for dashboard display. */
   getStatus(): QueueStatus {
     const pending = [
-      ...this.highQueue.map(i => ({ id: i.id, label: i.label, priority: i.priority, enqueuedAt: i.enqueuedAt })),
-      ...this.normalQueue.map(i => ({ id: i.id, label: i.label, priority: i.priority, enqueuedAt: i.enqueuedAt })),
+      ...this.highQueue.map((i) => ({
+        id: i.id,
+        label: i.label,
+        priority: i.priority,
+        enqueuedAt: i.enqueuedAt,
+      })),
+      ...this.normalQueue.map((i) => ({
+        id: i.id,
+        label: i.label,
+        priority: i.priority,
+        enqueuedAt: i.enqueuedAt,
+      })),
     ];
     return {
-      running: this.running ? {
-        id: this.running.id,
-        label: this.running.label,
-        priority: this.running.priority,
-        fn: this.running.fn,
-        enqueuedAt: this.running.enqueuedAt,
-      } : null,
+      running: this.running
+        ? {
+            id: this.running.id,
+            label: this.running.label,
+            priority: this.running.priority,
+            fn: this.running.fn,
+            enqueuedAt: this.running.enqueuedAt,
+          }
+        : null,
       pending,
       immediateRunning: this.immediateRunning,
     };
@@ -176,15 +191,17 @@ export class OperationQueue {
         }
 
         // Pick next item: HIGH first, then NORMAL
-        const item = this.highQueue.length > 0
-          ? this.highQueue.shift()!
-          : this.normalQueue.shift()!;
+        const item =
+          this.highQueue.length > 0 ? this.highQueue.shift()! : this.normalQueue.shift()!;
 
         this.running = item;
         const waitMs = Date.now() - item.enqueuedAt;
 
         if (waitMs > 1000) {
-          logger.info(MODULE, `Running [${item.priority}] ${item.label} (waited ${(waitMs / 1000).toFixed(1)}s)`);
+          logger.info(
+            MODULE,
+            `Running [${item.priority}] ${item.label} (waited ${(waitMs / 1000).toFixed(1)}s)`,
+          );
         } else {
           logger.debug(MODULE, `Running [${item.priority}] ${item.label}`);
         }

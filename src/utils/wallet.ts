@@ -18,10 +18,13 @@ let _keypair: Keypair | null = null;
  */
 export function getKeypair(): Keypair {
   if (useRemoteSigner) {
-    throw new Error('getKeypair() is disabled in signer mode — private key is held by the signer service');
+    throw new Error(
+      'getKeypair() is disabled in signer mode — private key is held by the signer service',
+    );
   }
   if (!_keypair) {
-    if (!config.privateKey) throw new Error('PRIVATE_KEY not configured and SIGNER_SOCKET_PATH not set');
+    if (!config.privateKey)
+      throw new Error('PRIVATE_KEY not configured and SIGNER_SOCKET_PATH not set');
     const secretKey = bs58.decode(config.privateKey);
     _keypair = Keypair.fromSecretKey(secretKey);
   }
@@ -138,7 +141,10 @@ export async function signLegacy(tx: Transaction): Promise<Transaction> {
 }
 
 /** Sign a legacy Transaction with additional signers (used by DAMMv2 createPosition). */
-export async function signLegacyWithExtra(tx: Transaction, extraSigners: Keypair[]): Promise<Transaction> {
+export async function signLegacyWithExtra(
+  tx: Transaction,
+  extraSigners: Keypair[],
+): Promise<Transaction> {
   if (useRemoteSigner) {
     // Extra signers (e.g. position keypair) sign locally first, then the main key signs remotely
     for (const signer of extraSigners) {
@@ -177,7 +183,7 @@ export class RemoteSignerWallet {
   }
 
   async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
-    return Promise.all(txs.map(tx => this.signTransaction(tx)));
+    return Promise.all(txs.map((tx) => this.signTransaction(tx)));
   }
 }
 

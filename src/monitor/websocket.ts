@@ -4,7 +4,11 @@ import { logger } from '../utils/logger';
 
 const MODULE = 'WebSocket';
 
-export type TxCallback = (signature: string, logs: string[], targetWallet: PublicKey) => Promise<void>;
+export type TxCallback = (
+  signature: string,
+  logs: string[],
+  targetWallet: PublicKey,
+) => Promise<void>;
 
 export class WebSocketMonitor {
   private connection: Connection;
@@ -49,42 +53,72 @@ export class WebSocketMonitor {
     const wallets: PublicKey[] = [];
     for (const w of config.targetWallets) {
       const addr = w.toBase58();
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(w); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(w);
+      }
     }
     for (const addr of config.closeOnlyWallets) {
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(new PublicKey(addr)); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(new PublicKey(addr));
+      }
     }
     // Orca target wallets
     for (const w of config.orcaTargetWallets) {
       const addr = w.toBase58();
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(w); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(w);
+      }
     }
     for (const addr of config.orcaCloseOnlyWallets) {
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(new PublicKey(addr)); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(new PublicKey(addr));
+      }
     }
     // Meteora target wallets
     for (const w of config.meteoraTargetWallets) {
       const addr = w.toBase58();
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(w); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(w);
+      }
     }
     for (const addr of config.meteoraCloseOnlyWallets) {
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(new PublicKey(addr)); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(new PublicKey(addr));
+      }
     }
     // PancakeSwap target wallets
     for (const w of config.pcsTargetWallets) {
       const addr = w.toBase58();
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(w); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(w);
+      }
     }
     for (const addr of config.pcsCloseOnlyWallets) {
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(new PublicKey(addr)); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(new PublicKey(addr));
+      }
     }
     // DAMM v2 target wallets
     for (const w of config.dammv2TargetWallets) {
       const addr = w.toBase58();
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(w); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(w);
+      }
     }
     for (const addr of config.dammv2CloseOnlyWallets) {
-      if (!seen.has(addr)) { seen.add(addr); wallets.push(new PublicKey(addr)); }
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        wallets.push(new PublicKey(addr));
+      }
     }
     return wallets;
   }
@@ -109,7 +143,7 @@ export class WebSocketMonitor {
             }
 
             if (this.callback) {
-              this.callback(logInfo.signature, logInfo.logs, wallet).catch(err => {
+              this.callback(logInfo.signature, logInfo.logs, wallet).catch((err) => {
                 logger.error(MODULE, `Callback error: ${err.message}`);
               });
             }
@@ -119,7 +153,10 @@ export class WebSocketMonitor {
         this.subscriptionIds.push(subId);
       }
 
-      logger.info(MODULE, `WebSocket subscriptions established (${this.subscriptionIds.length} wallets)`);
+      logger.info(
+        MODULE,
+        `WebSocket subscriptions established (${this.subscriptionIds.length} wallets)`,
+      );
       this.retryCount = 0;
     } catch (err: any) {
       logger.error(MODULE, `Subscription failed: ${err.message}`);
@@ -131,7 +168,9 @@ export class WebSocketMonitor {
     for (const subId of this.subscriptionIds) {
       try {
         this.connection.removeOnLogsListener(subId);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     this.subscriptionIds = [];
   }
@@ -154,12 +193,15 @@ export class WebSocketMonitor {
       const jitter = delay * 0.1 * Math.random();
       const totalDelay = Math.floor(delay + jitter);
 
-      logger.warn(MODULE, `Reconnecting in ${totalDelay}ms (attempt ${this.retryCount}/${this.maxRetries})`);
+      logger.warn(
+        MODULE,
+        `Reconnecting in ${totalDelay}ms (attempt ${this.retryCount}/${this.maxRetries})`,
+      );
 
       // Clean up all old subscriptions
       this.removeAllSubscriptions();
 
-      await new Promise(resolve => setTimeout(resolve, totalDelay));
+      await new Promise((resolve) => setTimeout(resolve, totalDelay));
 
       // Create fresh connection
       this.connection = new Connection(config.rpcUrl, {
@@ -187,7 +229,9 @@ export class WebSocketMonitor {
       if (silentMin >= SILENCE_RECONNECT_MIN && !this.reconnecting) {
         logger.warn(MODULE, `No events for ${silentMin}min — forcing reconnect (zombie-sub guard)`);
         this.lastEventTime = Date.now();
-        this.reconnect().catch(err => logger.error(MODULE, `Forced reconnect failed: ${err.message}`));
+        this.reconnect().catch((err) =>
+          logger.error(MODULE, `Forced reconnect failed: ${err.message}`),
+        );
       } else if (silentMin >= 10) {
         logger.debug(MODULE, `No events for ${silentMin}min`);
       }

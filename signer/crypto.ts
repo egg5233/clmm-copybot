@@ -9,10 +9,10 @@ const SALT_LEN = 32;
 const IV_LEN = 16;
 
 interface EncryptedData {
-  salt: string;   // hex
-  iv: string;     // hex
-  tag: string;    // hex (GCM auth tag)
-  data: string;   // hex (ciphertext)
+  salt: string; // hex
+  iv: string; // hex
+  tag: string; // hex (GCM auth tag)
+  data: string; // hex (ciphertext)
 }
 
 function deriveKey(password: string, salt: Buffer): Buffer {

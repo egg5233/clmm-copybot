@@ -10,15 +10,15 @@ import { OperationQueue } from '../executor/queue';
 
 export interface EventLogEntry {
   ts: number;
-  type: string;       // 'OPEN' | 'CLOSE' | 'INCREASE' | 'DECREASE' | 'SWAP' | 'SKIP'
+  type: string; // 'OPEN' | 'CLOSE' | 'INCREASE' | 'DECREASE' | 'SWAP' | 'SKIP'
   targetWallet: string;
   targetNft?: string;
   ourNft?: string;
   txSig?: string;
   success: boolean;
   error?: string;
-  pool?: string;      // e.g. "mintA/mintB" — for OPEN/CLOSE/SWAP
-  dex?: string;       // 'byreal' | 'orca' | 'meteora' | 'pancakeswap' | 'dammv2'
+  pool?: string; // e.g. "mintA/mintB" — for OPEN/CLOSE/SWAP
+  dex?: string; // 'byreal' | 'orca' | 'meteora' | 'pancakeswap' | 'dammv2'
 }
 
 export interface SwapHistoryEntry {

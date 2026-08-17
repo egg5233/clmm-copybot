@@ -41,8 +41,12 @@ export function getRecentLogs(): LogEntry[] {
 export { logEmitter };
 
 export const logger = {
-  info: (module: string, message: string, data?: Record<string, unknown>) => log('INFO', module, message, data),
-  warn: (module: string, message: string, data?: Record<string, unknown>) => log('WARN', module, message, data),
-  error: (module: string, message: string, data?: Record<string, unknown>) => log('ERROR', module, message, data),
-  debug: (module: string, message: string, data?: Record<string, unknown>) => log('DEBUG', module, message, data),
+  info: (module: string, message: string, data?: Record<string, unknown>) =>
+    log('INFO', module, message, data),
+  warn: (module: string, message: string, data?: Record<string, unknown>) =>
+    log('WARN', module, message, data),
+  error: (module: string, message: string, data?: Record<string, unknown>) =>
+    log('ERROR', module, message, data),
+  debug: (module: string, message: string, data?: Record<string, unknown>) =>
+    log('DEBUG', module, message, data),
 };

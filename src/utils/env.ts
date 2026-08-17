@@ -7,7 +7,9 @@ export function updateEnvFile(updates: Record<string, string>): void {
   let content = '';
   try {
     content = fs.readFileSync(envPath, 'utf-8');
-  } catch { /* file may not exist */ }
+  } catch {
+    /* file may not exist */
+  }
 
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, 'm');

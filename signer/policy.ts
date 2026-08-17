@@ -1,11 +1,17 @@
-import { Connection, PublicKey, VersionedTransaction, Transaction, SimulatedTransactionResponse } from '@solana/web3.js';
+import {
+  Connection,
+  PublicKey,
+  VersionedTransaction,
+  Transaction,
+  SimulatedTransactionResponse,
+} from '@solana/web3.js';
 import { signerConfig } from './config';
 import { resolveALTs, extractProgramIds } from './alt-resolver';
 
 /** SPL Token instruction discriminators (first byte of instruction data) */
-const SPL_TRANSFER = 3;          // Transfer
-const SPL_APPROVE = 4;           // Approve
-const SPL_SET_AUTHORITY = 6;     // SetAuthority
+const SPL_TRANSFER = 3; // Transfer
+const SPL_APPROVE = 4; // Approve
+const SPL_SET_AUTHORITY = 6; // SetAuthority
 const SPL_TRANSFER_CHECKED = 12; // TransferChecked
 
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -18,9 +24,13 @@ export interface PolicyResult {
 }
 
 const log = {
-  debug: (...args: any[]) => signerConfig.logLevel === 'debug' && console.log('[Policy:DEBUG]', ...args),
-  info: (...args: any[]) => ['debug', 'info'].includes(signerConfig.logLevel) && console.log('[Policy:INFO]', ...args),
-  warn: (...args: any[]) => ['debug', 'info', 'warn'].includes(signerConfig.logLevel) && console.warn('[Policy:WARN]', ...args),
+  debug: (...args: any[]) =>
+    signerConfig.logLevel === 'debug' && console.log('[Policy:DEBUG]', ...args),
+  info: (...args: any[]) =>
+    ['debug', 'info'].includes(signerConfig.logLevel) && console.log('[Policy:INFO]', ...args),
+  warn: (...args: any[]) =>
+    ['debug', 'info', 'warn'].includes(signerConfig.logLevel) &&
+    console.warn('[Policy:WARN]', ...args),
   error: (...args: any[]) => console.error('[Policy:ERROR]', ...args),
 };
 
@@ -52,13 +62,10 @@ export async function checkPolicy(
   } else {
     const ltx = Transaction.from(txBytes);
     tx = ltx;
-    allKeys = ltx.instructions.flatMap(ix => [
-      ix.programId,
-      ...ix.keys.map(k => k.pubkey),
-    ]);
+    allKeys = ltx.instructions.flatMap((ix) => [ix.programId, ...ix.keys.map((k) => k.pubkey)]);
     // Deduplicate
     const seen = new Set<string>();
-    allKeys = allKeys.filter(k => {
+    allKeys = allKeys.filter((k) => {
       const s = k.toBase58();
       if (seen.has(s)) return false;
       seen.add(s);
@@ -69,9 +76,10 @@ export async function checkPolicy(
   // ── Step 2: Static checks ────────────────────────────────────────────────
 
   // 2a. Program allowlist
-  const programIds = type === 'versioned'
-    ? extractProgramIds(allKeys, tx as VersionedTransaction)
-    : (tx as Transaction).instructions.map(ix => ix.programId);
+  const programIds =
+    type === 'versioned'
+      ? extractProgramIds(allKeys, tx as VersionedTransaction)
+      : (tx as Transaction).instructions.map((ix) => ix.programId);
 
   for (const pid of programIds) {
     const pidStr = pid.toBase58();
@@ -89,12 +97,11 @@ export async function checkPolicy(
     'HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq',
     'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
   ]);
-  const hasDexInstruction = programIds.some(pid => DEX_PROGRAMS.has(pid.toBase58()));
+  const hasDexInstruction = programIds.some((pid) => DEX_PROGRAMS.has(pid.toBase58()));
 
   // 2b. Check SPL Token transfer/approve/setAuthority destinations
-  const instructions = type === 'versioned'
-    ? (tx as VersionedTransaction).message.compiledInstructions
-    : null;
+  const instructions =
+    type === 'versioned' ? (tx as VersionedTransaction).message.compiledInstructions : null;
 
   if (instructions) {
     // Versioned TX — use compiled instructions
@@ -108,11 +115,16 @@ export async function checkPolicy(
         // Account layout: [source, mint, destination, authority] for TransferChecked
         const destIdx = disc === SPL_TRANSFER ? ix.accountKeyIndexes[1] : ix.accountKeyIndexes[2];
         const dest = allKeys[destIdx]?.toBase58();
-        const mint = disc === SPL_TRANSFER_CHECKED
-          ? allKeys[ix.accountKeyIndexes[1]]?.toBase58()
-          : undefined;
+        const mint =
+          disc === SPL_TRANSFER_CHECKED ? allKeys[ix.accountKeyIndexes[1]]?.toBase58() : undefined;
         if (dest) {
-          const check = await checkTransferDestination(connection, dest, hasDexInstruction, mint, programId);
+          const check = await checkTransferDestination(
+            connection,
+            dest,
+            hasDexInstruction,
+            mint,
+            programId,
+          );
           if (!check.allowed) return check;
         }
       } else if (disc === SPL_APPROVE) {
@@ -123,7 +135,10 @@ export async function checkPolicy(
         // Block approve to unknown addresses
       } else if (disc === SPL_SET_AUTHORITY) {
         log.warn('SPL SetAuthority detected');
-        return { allowed: false, reason: 'SPL SetAuthority is blocked — potential authority hijack' };
+        return {
+          allowed: false,
+          reason: 'SPL SetAuthority is blocked — potential authority hijack',
+        };
       }
     }
   } else {
@@ -138,11 +153,20 @@ export async function checkPolicy(
         const dest = ix.keys[destIdx]?.pubkey?.toBase58();
         const mint = disc === SPL_TRANSFER_CHECKED ? ix.keys[1]?.pubkey?.toBase58() : undefined;
         if (dest) {
-          const check = await checkTransferDestination(connection, dest, hasDexInstruction, mint, programId);
+          const check = await checkTransferDestination(
+            connection,
+            dest,
+            hasDexInstruction,
+            mint,
+            programId,
+          );
           if (!check.allowed) return check;
         }
       } else if (disc === SPL_SET_AUTHORITY) {
-        return { allowed: false, reason: 'SPL SetAuthority is blocked — potential authority hijack' };
+        return {
+          allowed: false,
+          reason: 'SPL SetAuthority is blocked — potential authority hijack',
+        };
       }
     }
   }
@@ -158,7 +182,11 @@ export async function checkPolicy(
       });
       simResult = response.value;
     } else {
-      const response = await connection.simulateTransaction(tx as Transaction, undefined, undefined);
+      const response = await connection.simulateTransaction(
+        tx as Transaction,
+        undefined,
+        undefined,
+      );
       simResult = response.value;
     }
 
@@ -172,7 +200,7 @@ export async function checkPolicy(
     // Skip this check for Jupiter TXs — Jupiter routes through dozens of AMM programs
     // via CPI, and we can't pre-list them all. Jupiter itself is whitelisted statically.
     const JUPITER_PROGRAM = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
-    const hasJupiter = programIds.some(pid => pid.toBase58() === JUPITER_PROGRAM);
+    const hasJupiter = programIds.some((pid) => pid.toBase58() === JUPITER_PROGRAM);
     if (!hasJupiter && simResult.logs) {
       const invokedPrograms = extractInvokedPrograms(simResult.logs);
       for (const pid of invokedPrograms) {
@@ -246,10 +274,17 @@ async function checkTransferDestination(
   }
 
   log.warn(`REJECTING standalone SPL transfer to ${destAddress}`);
-  return { allowed: false, reason: `Standalone SPL transfer to non-whitelisted address: ${destAddress}` };
+  return {
+    allowed: false,
+    reason: `Standalone SPL transfer to non-whitelisted address: ${destAddress}`,
+  };
 }
 
-function isAtaForWhitelistedOwner(destAddress: string, mintAddress: string, tokenProgramId: string): boolean {
+function isAtaForWhitelistedOwner(
+  destAddress: string,
+  mintAddress: string,
+  tokenProgramId: string,
+): boolean {
   try {
     const dest = new PublicKey(destAddress);
     const mint = new PublicKey(mintAddress);

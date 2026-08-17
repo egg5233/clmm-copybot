@@ -24,24 +24,26 @@ describe('claimLpFeesCliParityForTest payload handling', () => {
           // Second round returns nothing so the claim loop terminates.
           return unclaimedCalls === 1
             ? {
-              result: {
-                data: {
-                  unclaimedOpenIncentives: [
-                    {
-                      positionAddress: 'reward-position',
-                      syncedTokenAmount: 2,
-                      lockedTokenAmount: 0,
-                      claimedTokenAmount: 0,
-                    },
-                  ],
-                  unclaimedClosedIncentives: [],
+                result: {
+                  data: {
+                    unclaimedOpenIncentives: [
+                      {
+                        positionAddress: 'reward-position',
+                        syncedTokenAmount: 2,
+                        lockedTokenAmount: 0,
+                        claimedTokenAmount: 0,
+                      },
+                    ],
+                    unclaimedClosedIncentives: [],
+                  },
                 },
-              },
-            }
+              }
             : { result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } } };
         }
         if (apiPath.startsWith('position/list')) {
-          return { result: { data: { positions: [{ positionAddress: 'fee-position' }], total: 1 } } };
+          return {
+            result: { data: { positions: [{ positionAddress: 'fee-position' }], total: 1 } },
+          };
         }
         throw new Error(`unexpected apiGet ${apiPath}`);
       },
@@ -64,13 +66,19 @@ describe('claimLpFeesCliParityForTest payload handling', () => {
           };
         }
         if (apiPath === 'incentive/order-v2') {
-          return { result: { data: { txList: [{ txSignature: 'reward-sig' }], claimTokenList: [] } } };
+          return {
+            result: { data: { txList: [{ txSignature: 'reward-sig' }], claimTokenList: [] } },
+          };
         }
         if (apiPath === 'incentive/encode-fee') {
           return {
             result: {
               data: [
-                { positionAddress: 'fee-position', txPayload: 'fee-payload', tokens: [token('USDC', '5')] },
+                {
+                  positionAddress: 'fee-position',
+                  txPayload: 'fee-payload',
+                  tokens: [token('USDC', '5')],
+                },
               ],
             },
           };
@@ -99,10 +107,14 @@ describe('claimLpFeesCliParityForTest payload handling', () => {
       getWalletAddress: () => 'wallet-1',
       apiGet: async (apiPath: string) => {
         if (apiPath.startsWith('position/unclaimed-data')) {
-          return { result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } } };
+          return {
+            result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } },
+          };
         }
         if (apiPath.startsWith('position/list')) {
-          return { result: { data: { positions: [{ positionAddress: 'fee-position' }], total: 1 } } };
+          return {
+            result: { data: { positions: [{ positionAddress: 'fee-position' }], total: 1 } },
+          };
         }
         throw new Error(`unexpected apiGet ${apiPath}`);
       },
@@ -112,7 +124,11 @@ describe('claimLpFeesCliParityForTest payload handling', () => {
           return {
             result: {
               data: [
-                { positionAddress: 'fee-position', txPayload: 'fee-payload', tokens: [token('USDC', '5')] },
+                {
+                  positionAddress: 'fee-position',
+                  txPayload: 'fee-payload',
+                  tokens: [token('USDC', '5')],
+                },
               ],
             },
           };

@@ -35,7 +35,11 @@ function queueImportedCloses(
   result: ReturnType<typeof diffByrealNftAudit>,
   queue: OperationQueue,
 ) {
-  return ByrealPositionExecutor.prototype.queueImportedByrealAuditCloses.call(executor, result, queue);
+  return ByrealPositionExecutor.prototype.queueImportedByrealAuditCloses.call(
+    executor,
+    result,
+    queue,
+  );
 }
 
 describe('queueImportedByrealAuditCloses', () => {

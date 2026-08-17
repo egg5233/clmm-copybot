@@ -95,7 +95,9 @@ export function resolvePump(mint: string, status: 'approved' | 'rejected'): void
     if (!tnCache[mint]) tnCache[mint] = {};
     tnCache[mint].symbol = entry.symbol;
     fs.writeFileSync(tnFile, JSON.stringify(tnCache));
-  } catch { /* best effort */ }
+  } catch {
+    /* best effort */
+  }
 
   // Only rejected → blacklist. Approved stays in pump-pending state only
   // (isPumpApproved() check in byreal-position.ts handles trading logic)
@@ -140,7 +142,7 @@ export async function pollApprovals(): Promise<void> {
     }
   }
 
-  const hasPending = Object.values(pendingMap).some(e => e.status === 'pending');
+  const hasPending = Object.values(pendingMap).some((e) => e.status === 'pending');
   if (!hasPending) return;
 
   const url = (config as any).discordNotifyUrl?.replace('/notify', '') || '';
@@ -155,7 +157,7 @@ export async function pollApprovals(): Promise<void> {
       if (res.status !== 404) logger.warn(MODULE, `Poll failed: ${res.status}`);
       return;
     }
-    const data = await res.json() as Record<string, { status: string; timestamp: number }>;
+    const data = (await res.json()) as Record<string, { status: string; timestamp: number }>;
 
     for (const [mint, result] of Object.entries(data)) {
       const entry = pendingMap[mint];
@@ -163,7 +165,10 @@ export async function pollApprovals(): Promise<void> {
 
       if (result.status === 'approved' || result.status === 'rejected') {
         if (result.timestamp && result.timestamp < entry.detectedAt) {
-          logger.debug(MODULE, `Stale KV result for ${entry.symbol} (KV: ${result.timestamp} < detected: ${entry.detectedAt}), ignoring`);
+          logger.debug(
+            MODULE,
+            `Stale KV result for ${entry.symbol} (KV: ${result.timestamp} < detected: ${entry.detectedAt}), ignoring`,
+          );
           continue;
         }
         resolvePump(mint, result.status);
@@ -176,7 +181,9 @@ export async function pollApprovals(): Promise<void> {
             headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
             body: JSON.stringify({ mint }),
           });
-        } catch { /* best effort */ }
+        } catch {
+          /* best effort */
+        }
       }
     }
   } catch (err: any) {

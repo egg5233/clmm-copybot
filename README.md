@@ -10,7 +10,7 @@ This system has been running in production with real funds since early 2026. Thi
 
 ## What it does
 
-The bot subscribes to the transaction logs of one or more *target wallets* over a Helius WebSocket. When a target opens, increases, decreases, or closes a CLMM liquidity position — or performs a Jupiter swap — the bot parses the raw transaction logs into a typed event, filters it through configurable risk gates (pool TVL, pool age, token blacklist, coin-concentration caps, pump-token approval flow), and replays a proportionally-sized version of the same operation from its own wallet on the same pool.
+The bot subscribes to the transaction logs of one or more _target wallets_ over a Helius WebSocket. When a target opens, increases, decreases, or closes a CLMM liquidity position — or performs a Jupiter swap — the bot parses the raw transaction logs into a typed event, filters it through configurable risk gates (pool TVL, pool age, token blacklist, coin-concentration caps, pump-token approval flow), and replays a proportionally-sized version of the same operation from its own wallet on the same pool.
 
 ```mermaid
 flowchart LR
@@ -64,9 +64,9 @@ The design assumption is that a bot which parses untrusted on-chain data and cal
   - program allowlist (~29 programs: the five DEXes, system/token programs, and known Jupiter route intermediaries) — any unknown program is a rejection;
   - SPL token instruction inspection — `SetAuthority` is always rejected; transfer destinations must be whitelisted, be an ATA of a whitelisted owner, or occur inside a DEX transaction;
   - transaction simulation with CPI discovery — programs invoked indirectly must also pass the allowlist.
-- **Trust boundary.** Compromise of the bot process does not yield the key, and constrains an attacker to the operations the policy allows. The model does *not* defend against compromise of the host itself or of an allowlisted on-chain program.
+- **Trust boundary.** Compromise of the bot process does not yield the key, and constrains an attacker to the operations the policy allows. The model does _not_ defend against compromise of the host itself or of an allowlisted on-chain program.
 
-This is the same problem shape as permission systems for autonomous AI agents: an untrusted automated process, a policy layer with hard guarantees, and a human-in-the-loop unlock step. A Rust rewrite of the signer with a differential compatibility harness lives in [`signer-rs/`](signer-rs/) *(in progress — see Roadmap)*.
+This is the same problem shape as permission systems for autonomous AI agents: an untrusted automated process, a policy layer with hard guarantees, and a human-in-the-loop unlock step. A Rust rewrite of the signer with a differential compatibility harness lives in [`signer-rs/`](signer-rs/) _(in progress — see Roadmap)_.
 
 ## Features
 
@@ -91,17 +91,17 @@ For the recommended two-process setup (bot + signer daemon), see [`signer/`](sig
 
 ### Key configuration
 
-| Variable | Purpose |
-|---|---|
-| `RPC_URL` / `WS_URL` | Helius RPC + WebSocket (transaction send and log subscription) |
-| `ALCHEMY_RPC_URL` | Optional read-only RPC to avoid indexer lag |
-| `TARGET_WALLETS` | Comma-separated wallets to mirror, with optional `:ratio` suffix |
-| `AMOUNT_RATIO` | Position size relative to target (e.g. `0.5` = 50%) |
-| `WALLET_PUBLIC_KEY` + `SIGNER_SOCKET_PATH` | Signer mode (recommended) — bot builds unsigned TXs only |
-| `PRIVATE_KEY` | Legacy single-process mode (avoid) |
-| `DRY_RUN` | Parse and log without trading |
-| `MIN_POOL_TVL`, `MIN_POOL_AGE_DAYS`, `TOKEN_BLACKLIST`, `MAX_COIN_CONCENTRATION_USD` | Risk gates |
-| `DASHBOARD_PASSWORD`, `DASHBOARD_PORT` | Enable the web dashboard |
+| Variable                                                                             | Purpose                                                          |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `RPC_URL` / `WS_URL`                                                                 | Helius RPC + WebSocket (transaction send and log subscription)   |
+| `ALCHEMY_RPC_URL`                                                                    | Optional read-only RPC to avoid indexer lag                      |
+| `TARGET_WALLETS`                                                                     | Comma-separated wallets to mirror, with optional `:ratio` suffix |
+| `AMOUNT_RATIO`                                                                       | Position size relative to target (e.g. `0.5` = 50%)              |
+| `WALLET_PUBLIC_KEY` + `SIGNER_SOCKET_PATH`                                           | Signer mode (recommended) — bot builds unsigned TXs only         |
+| `PRIVATE_KEY`                                                                        | Legacy single-process mode (avoid)                               |
+| `DRY_RUN`                                                                            | Parse and log without trading                                    |
+| `MIN_POOL_TVL`, `MIN_POOL_AGE_DAYS`, `TOKEN_BLACKLIST`, `MAX_COIN_CONCENTRATION_USD` | Risk gates                                                       |
+| `DASHBOARD_PASSWORD`, `DASHBOARD_PORT`                                               | Enable the web dashboard                                         |
 
 The full reference (60+ variables) is documented in [.env.example](.env.example) and [README.zh-TW.md](README.zh-TW.md).
 
@@ -125,17 +125,17 @@ docs/                        # design documents
 ## Engineering practices
 
 - **A regression test per production incident.** Most files in `tests/` exist because something once went wrong with real money on the line; the test pins the fix.
-- **Agentic development.** The system is built and maintained with Claude Code under a documented workflow — see [docs/agentic-workflow.md](docs/agentic-workflow.md) *(forthcoming)*. The signer's policy engine doubles as the guardrail layer that makes autonomous operation acceptable.
+- **Agentic development.** The system is built and maintained with Claude Code under a documented workflow — see [docs/agentic-workflow.md](docs/agentic-workflow.md) _(forthcoming)_. The signer's policy engine doubles as the guardrail layer that makes autonomous operation acceptable.
 - **Changelog discipline.** Every deploy is versioned and recorded in [CHANGELOG.md](CHANGELOG.md) (65KB and counting).
 
 ## Roadmap
 
-| Item | Status |
-|---|---|
-| Vitest migration + lint + CI | in progress |
+| Item                                                                                                                                    | Status      |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Vitest migration + lint + CI                                                                                                            | in progress |
 | **Rust signer** (`signer-rs/`): drop-in daemon, differential test harness vs the TS implementation, byte-identical signing verification | in progress |
-| **Postgres persistence**: replace JSON-file state with a repository layer, migrations, docker-compose | planned |
-| Prometheus metrics + health endpoints | planned |
+| **Postgres persistence**: replace JSON-file state with a repository layer, migrations, docker-compose                                   | planned     |
+| Prometheus metrics + health endpoints                                                                                                   | planned     |
 
 ## License
 

@@ -22,20 +22,20 @@ let snapshotInProgress = false;
 const priceCache = new Map<string, number>();
 
 // Retention limits
-const MAX_RAW = 576;     // 48hr @ 5min
-const MAX_HOURLY = 720;  // 30d @ 1hr
+const MAX_RAW = 576; // 48hr @ 5min
+const MAX_HOURLY = 720; // 30d @ 1hr
 // daily: no limit (permanent)
 
 export interface AssetSnapshot {
-  ts: number;           // epoch ms
-  tokensUsd: number;    // on-chain wallet balances × price
-  lpValueUsd: number;   // Byreal + Orca + Meteora totalValue
+  ts: number; // epoch ms
+  tokensUsd: number; // on-chain wallet balances × price
+  lpValueUsd: number; // Byreal + Orca + Meteora totalValue
   unclaimedUsd: number; // unclaimedFee + unclaimedRewards
-  bonusUsd: number;     // unclaimedBonus
+  bonusUsd: number; // unclaimedBonus
   lockedSolUsd: number; // positionCount × rentPerPosition × SOL price
-  totalUsd: number;     // sum of all
-  solPrice?: number;       // SOL/USD price at snapshot time
-  solBalanceUsd?: number;  // SOL balance × solPrice (subset of tokensUsd)
+  totalUsd: number; // sum of all
+  solPrice?: number; // SOL/USD price at snapshot time
+  solBalanceUsd?: number; // SOL balance × solPrice (subset of tokensUsd)
   // Per-dex breakdown (v1.21.0+)
   byrealLpUsd?: number;
   orcaLpUsd?: number;
@@ -55,9 +55,9 @@ export interface AssetSnapshot {
 }
 
 export interface TrendData {
-  raw: AssetSnapshot[];     // 5min snapshots, keep 48hr
-  hourly: AssetSnapshot[];  // hourly aggregates, keep 30d
-  daily: AssetSnapshot[];   // daily aggregates, permanent
+  raw: AssetSnapshot[]; // 5min snapshots, keep 48hr
+  hourly: AssetSnapshot[]; // hourly aggregates, keep 30d
+  daily: AssetSnapshot[]; // daily aggregates, permanent
 }
 
 let trendData: TrendData = { raw: [], hourly: [], daily: [] };
@@ -121,7 +121,10 @@ function loadTrend(): void {
       logger.warn(MODULE, `Main trend file unreadable, attempting recovery from ${backupFile}`);
       loaded = tryParseTrendFile(backupFile);
       if (loaded) {
-        logger.info(MODULE, `Recovered trend from backup: raw=${loaded.raw.length} hourly=${loaded.hourly.length} daily=${loaded.daily.length}`);
+        logger.info(
+          MODULE,
+          `Recovered trend from backup: raw=${loaded.raw.length} hourly=${loaded.hourly.length} daily=${loaded.daily.length}`,
+        );
       }
     }
   }
@@ -132,7 +135,10 @@ function loadTrend(): void {
       // Could be migration case OR new install — only rebuild if file was actually old format (array)
       const raw = fs.existsSync(TREND_FILE) ? fs.readFileSync(TREND_FILE, 'utf-8') : '';
       if (raw.trim().startsWith('[')) {
-        logger.info(MODULE, `Migrating ${loaded.raw.length} old-format snapshots to tiered structure`);
+        logger.info(
+          MODULE,
+          `Migrating ${loaded.raw.length} old-format snapshots to tiered structure`,
+        );
         trendData = loaded;
         rebuildAggregates();
         saveTrend();
@@ -144,7 +150,10 @@ function loadTrend(): void {
     }
   } else if (fs.existsSync(TREND_FILE)) {
     // File exists but unreadable AND no backup — preserve in-memory (don't wipe)
-    logger.error(MODULE, `Trend file is corrupt and no backup available — keeping in-memory state intact`);
+    logger.error(
+      MODULE,
+      `Trend file is corrupt and no backup available — keeping in-memory state intact`,
+    );
     // trendData stays as whatever it was (initial { raw:[], hourly:[], daily:[] } on first load)
   }
 
@@ -196,12 +205,8 @@ function rebuildAggregates(): void {
   }
 
   // Sort by key and extract values
-  trendData.hourly = [...hourMap.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([, snap]) => snap);
-  trendData.daily = [...dayMap.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([, snap]) => snap);
+  trendData.hourly = [...hourMap.entries()].sort((a, b) => a[0] - b[0]).map(([, snap]) => snap);
+  trendData.daily = [...dayMap.entries()].sort((a, b) => a[0] - b[0]).map(([, snap]) => snap);
 }
 
 function saveTrend(): void {
@@ -214,7 +219,11 @@ function saveTrend(): void {
     const payload = JSON.stringify(trendData);
     fs.writeFileSync(tmpFile, payload);
     if (fs.existsSync(TREND_FILE)) {
-      try { fs.copyFileSync(TREND_FILE, backupFile); } catch { /* best-effort */ }
+      try {
+        fs.copyFileSync(TREND_FILE, backupFile);
+      } catch {
+        /* best-effort */
+      }
     }
     fs.renameSync(tmpFile, TREND_FILE);
   } catch (err: any) {
@@ -226,12 +235,14 @@ export function getAssetTrend(): TrendData {
   return trendData;
 }
 
-async function fetchJupiterHoldings(address: string): Promise<{ mints: string[]; solBalance: number; holdings: Record<string, number> }> {
+async function fetchJupiterHoldings(
+  address: string,
+): Promise<{ mints: string[]; solBalance: number; holdings: Record<string, number> }> {
   const res = await fetch(`https://api.jup.ag/ultra/v1/holdings/${address}`, {
     headers: { 'x-api-key': config.jupApiKey },
   });
   if (!res.ok) throw new Error(`Jupiter holdings ${res.status}`);
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
 
   const holdings: Record<string, number> = {};
   const mints: string[] = [];
@@ -265,7 +276,7 @@ async function fetchJupiterPrices(mints: string[]): Promise<Record<string, numbe
     headers: { 'x-api-key': config.jupApiKey },
   });
   if (!res.ok) throw new Error(`Jupiter price ${res.status}`);
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
 
   const prices: Record<string, number> = {};
   for (const [mint, info] of Object.entries(data)) {
@@ -290,13 +301,13 @@ async function fetchByrealOverview(address: string): Promise<{
     {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.byreal.io/',
+        Accept: 'application/json',
+        Referer: 'https://www.byreal.io/',
       },
     },
   );
   if (!res.ok) throw new Error(`Byreal overview ${res.status}`);
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
   const r = data?.result?.data;
   if (!r) throw new Error('Byreal overview empty');
   return {
@@ -309,8 +320,8 @@ async function fetchByrealOverview(address: string): Promise<{
 
 const BYREAL_API_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Accept': 'application/json',
-  'Referer': 'https://www.byreal.io/',
+  Accept: 'application/json',
+  Referer: 'https://www.byreal.io/',
 };
 
 /** Fetch unclaimed LP fees from position/unclaimed-v2 (same source as Byreal website). */
@@ -320,7 +331,7 @@ async function fetchByrealUnclaimedFees(address: string): Promise<number> {
     { headers: BYREAL_API_HEADERS },
   );
   if (!res.ok) throw new Error(`Byreal unclaimed-v2 ${res.status}`);
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
   const list: any[] = data?.result?.data?.list;
   if (!list) throw new Error('Byreal unclaimed-v2 empty');
   let total = 0;
@@ -332,13 +343,19 @@ async function fetchByrealUnclaimedFees(address: string): Promise<number> {
 
 async function fetchEpochBonus(address: string): Promise<number> {
   const [r1, r2] = await Promise.all([
-    fetch(`https://api2.byreal.io/byreal/api/dex/v2/copyfarmer/epoch-bonus?walletAddress=${address}&type=1`, { headers: BYREAL_API_HEADERS }),
-    fetch(`https://api2.byreal.io/byreal/api/dex/v2/copyfarmer/epoch-bonus?walletAddress=${address}&type=2`, { headers: BYREAL_API_HEADERS }),
+    fetch(
+      `https://api2.byreal.io/byreal/api/dex/v2/copyfarmer/epoch-bonus?walletAddress=${address}&type=1`,
+      { headers: BYREAL_API_HEADERS },
+    ),
+    fetch(
+      `https://api2.byreal.io/byreal/api/dex/v2/copyfarmer/epoch-bonus?walletAddress=${address}&type=2`,
+      { headers: BYREAL_API_HEADERS },
+    ),
   ]);
   if (!r1.ok) throw new Error(`Byreal epoch-bonus type=1 ${r1.status}`);
   if (!r2.ok) throw new Error(`Byreal epoch-bonus type=2 ${r2.status}`);
-  const d1 = await r1.json() as any;
-  const d2 = await r2.json() as any;
+  const d1 = (await r1.json()) as any;
+  const d2 = (await r2.json()) as any;
   const bonus1 = parseFloat(d1?.result?.data?.['1']?.totalBonusUsd || '0');
   const bonus2 = parseFloat(d2?.result?.data?.['2']?.totalBonusUsd || '0');
   return bonus1 + bonus2;
@@ -361,7 +378,7 @@ export function setOrcaLpFetcher(fetcher: OrcaLpFetcher): void {
 }
 
 type MeteoraLpFetcher = () => Promise<{ lpUsd: number; feeUsd: number; count: number }>;
-let meteoraRentPerPosition = 0.00890880;
+let meteoraRentPerPosition = 0.0089088;
 let meteoraLpFetcherRef: MeteoraLpFetcher | null = null;
 
 export function setMeteoraRentPerPosition(value: number): void {
@@ -385,7 +402,7 @@ export function setPcsLpFetcher(fetcher: PcsLpFetcher): void {
 }
 
 type DammV2LpFetcher = () => Promise<{ lpUsd: number; feeUsd: number; count: number }>;
-let dammv2RentPerPosition = 0.00890880;
+let dammv2RentPerPosition = 0.0089088;
 let dammv2LpFetcherRef: DammV2LpFetcher | null = null;
 
 export function setDammV2RentPerPosition(value: number): void {
@@ -403,7 +420,10 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
     fetchByrealOverview(address),
     fetchEpochBonus(address),
     fetchByrealUnclaimedFees(address).catch((err: any) => {
-      logger.debug(MODULE, `Byreal unclaimed-v2 failed, fallback to providerOverview: ${(err.message || '').slice(0, 80)}`);
+      logger.debug(
+        MODULE,
+        `Byreal unclaimed-v2 failed, fallback to providerOverview: ${(err.message || '').slice(0, 80)}`,
+      );
       return null;
     }),
   ]);
@@ -423,7 +443,7 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
   }
 
   const byrealLpUsd = byrealData.totalValue;
-  const byrealFeesUsd = byrealUnclaimedUsd ?? (byrealData.unclaimedFee + byrealData.unclaimedRewards);
+  const byrealFeesUsd = byrealUnclaimedUsd ?? byrealData.unclaimedFee + byrealData.unclaimedRewards;
   const bonusUsd = epochBonusUsd;
   const byrealLockedUsd = byrealData.openPositionCount * rentPerPosition * solPrice;
 
@@ -439,7 +459,10 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
       orcaFeesUsd = orcaData.feeUsd;
       orcaLockedUsd = orcaData.count * orcaRentPerPosition * solPrice;
       if (orcaData.count > 0) {
-        logger.debug(MODULE, `Orca LP: $${orcaData.lpUsd.toFixed(2)} + fees $${orcaData.feeUsd.toFixed(2)} (${orcaData.count} positions)`);
+        logger.debug(
+          MODULE,
+          `Orca LP: $${orcaData.lpUsd.toFixed(2)} + fees $${orcaData.feeUsd.toFixed(2)} (${orcaData.count} positions)`,
+        );
       }
     } catch (err: any) {
       logger.debug(MODULE, `Orca LP fetch failed: ${(err.message || '').slice(0, 80)}`);
@@ -458,7 +481,10 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
       meteoraFeesUsd = meteoraData.feeUsd;
       meteoraLockedUsd = meteoraData.count * meteoraRentPerPosition * solPrice;
       if (meteoraData.count > 0) {
-        logger.debug(MODULE, `Meteora LP: $${meteoraData.lpUsd.toFixed(2)} + fees $${meteoraData.feeUsd.toFixed(2)} (${meteoraData.count} positions)`);
+        logger.debug(
+          MODULE,
+          `Meteora LP: $${meteoraData.lpUsd.toFixed(2)} + fees $${meteoraData.feeUsd.toFixed(2)} (${meteoraData.count} positions)`,
+        );
       }
     } catch (err: any) {
       logger.debug(MODULE, `Meteora LP fetch failed: ${(err.message || '').slice(0, 80)}`);
@@ -476,7 +502,10 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
       pcsFeesUsd = pcsData.feeUsd;
       pcsLockedUsd = pcsData.count * pcsRentPerPosition * solPrice;
       if (pcsData.count > 0) {
-        logger.debug(MODULE, `PCS LP: $${pcsData.lpUsd.toFixed(2)} + fees $${pcsData.feeUsd.toFixed(2)} (${pcsData.count} positions)`);
+        logger.debug(
+          MODULE,
+          `PCS LP: $${pcsData.lpUsd.toFixed(2)} + fees $${pcsData.feeUsd.toFixed(2)} (${pcsData.count} positions)`,
+        );
       }
     } catch (err: any) {
       logger.debug(MODULE, `PCS LP fetch failed: ${(err.message || '').slice(0, 80)}`);
@@ -494,7 +523,10 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
       dammv2FeesUsd = dammv2Data.feeUsd;
       dammv2LockedUsd = dammv2Data.count * dammv2RentPerPosition * solPrice;
       if (dammv2Data.count > 0) {
-        logger.debug(MODULE, `DAMM v2 LP: $${dammv2Data.lpUsd.toFixed(2)} + fees $${dammv2Data.feeUsd.toFixed(2)} (${dammv2Data.count} positions)`);
+        logger.debug(
+          MODULE,
+          `DAMM v2 LP: $${dammv2Data.lpUsd.toFixed(2)} + fees $${dammv2Data.feeUsd.toFixed(2)} (${dammv2Data.count} positions)`,
+        );
       }
     } catch (err: any) {
       logger.debug(MODULE, `DAMM v2 LP fetch failed: ${(err.message || '').slice(0, 80)}`);
@@ -503,7 +535,8 @@ async function fetchSnapshotData(address: string): Promise<AssetSnapshot> {
 
   const lpValueUsd = byrealLpUsd + orcaLpUsd + meteoraLpUsd + pcsLpUsd + dammv2LpUsd;
   const unclaimedUsd = byrealFeesUsd + orcaFeesUsd + meteoraFeesUsd + pcsFeesUsd + dammv2FeesUsd;
-  const lockedSolUsd = byrealLockedUsd + orcaLockedUsd + meteoraLockedUsd + pcsLockedUsd + dammv2LockedUsd;
+  const lockedSolUsd =
+    byrealLockedUsd + orcaLockedUsd + meteoraLockedUsd + pcsLockedUsd + dammv2LockedUsd;
   const totalUsd = tokensUsd + lpValueUsd + unclaimedUsd + bonusUsd + lockedSolUsd;
 
   return {
@@ -543,8 +576,8 @@ function commitSnapshot(snapshot: AssetSnapshot): void {
   const now = Date.now();
   const rawCutoff = now - 48 * 60 * 60 * 1000;
   const hourlyCutoff = now - 30 * 24 * 60 * 60 * 1000;
-  trendData.raw = trendData.raw.filter(s => s.ts >= rawCutoff);
-  trendData.hourly = trendData.hourly.filter(s => s.ts >= hourlyCutoff);
+  trendData.raw = trendData.raw.filter((s) => s.ts >= rawCutoff);
+  trendData.hourly = trendData.hourly.filter((s) => s.ts >= hourlyCutoff);
 
   if (trendData.raw.length > MAX_RAW) {
     trendData.raw.splice(0, trendData.raw.length - MAX_RAW);
@@ -554,13 +587,18 @@ function commitSnapshot(snapshot: AssetSnapshot): void {
   }
 
   saveTrend();
-  logger.info(MODULE, `Snapshot: $${snapshot.totalUsd.toFixed(2)} (tokens=$${snapshot.tokensUsd.toFixed(2)} lp=$${snapshot.lpValueUsd.toFixed(2)} fees=$${snapshot.unclaimedUsd.toFixed(2)} bonus=$${snapshot.bonusUsd.toFixed(2)} locked=$${snapshot.lockedSolUsd.toFixed(2)}) [raw=${trendData.raw.length} hourly=${trendData.hourly.length} daily=${trendData.daily.length}]`);
+  logger.info(
+    MODULE,
+    `Snapshot: $${snapshot.totalUsd.toFixed(2)} (tokens=$${snapshot.tokensUsd.toFixed(2)} lp=$${snapshot.lpValueUsd.toFixed(2)} fees=$${snapshot.unclaimedUsd.toFixed(2)} bonus=$${snapshot.bonusUsd.toFixed(2)} locked=$${snapshot.lockedSolUsd.toFixed(2)}) [raw=${trendData.raw.length} hourly=${trendData.hourly.length} daily=${trendData.daily.length}]`,
+  );
 
   // Update shared portfolio state (used by concentration filter in byreal-position.ts)
   setLatestTotalUsd(snapshot.totalUsd);
 
   if (snapshotCallback) {
-    try { snapshotCallback(snapshot.totalUsd); } catch {}
+    try {
+      snapshotCallback(snapshot.totalUsd);
+    } catch {}
   }
 }
 
@@ -578,13 +616,22 @@ async function collectAssetSnapshot(): Promise<void> {
       if (prev.totalUsd > 0) {
         const pctChange = Math.abs(snapshot.totalUsd - prev.totalUsd) / prev.totalUsd;
         if (pctChange >= ANOMALY_PCT) {
-          logger.warn(MODULE, `Anomaly detected: $${prev.totalUsd} → $${snapshot.totalUsd} (${(pctChange * 100).toFixed(1)}%), re-querying in 60s...`);
-          await new Promise(resolve => setTimeout(resolve, ANOMALY_REQUERY_DELAY));
+          logger.warn(
+            MODULE,
+            `Anomaly detected: $${prev.totalUsd} → $${snapshot.totalUsd} (${(pctChange * 100).toFixed(1)}%), re-querying in 60s...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, ANOMALY_REQUERY_DELAY));
           if (cacheInvalidatorRef) cacheInvalidatorRef();
           snapshot = await fetchSnapshotData(address);
           snapshot.ts = Date.now();
-          const newPct = prev.totalUsd > 0 ? Math.abs(snapshot.totalUsd - prev.totalUsd) / prev.totalUsd * 100 : 0;
-          logger.info(MODULE, `Re-query result: $${snapshot.totalUsd.toFixed(2)} (${newPct.toFixed(1)}% from prev)`);
+          const newPct =
+            prev.totalUsd > 0
+              ? (Math.abs(snapshot.totalUsd - prev.totalUsd) / prev.totalUsd) * 100
+              : 0;
+          logger.info(
+            MODULE,
+            `Re-query result: $${snapshot.totalUsd.toFixed(2)} (${newPct.toFixed(1)}% from prev)`,
+          );
         }
       }
     }
@@ -607,7 +654,7 @@ function aggregateTiers(snapshot: AssetSnapshot): void {
     // Find the last raw snapshot from the previous hour
     const prevHourEnd = currentHour; // exclusive boundary
     const prevHourStart = lastAggregatedHour;
-    const candidates = trendData.raw.filter(s => s.ts >= prevHourStart && s.ts < prevHourEnd);
+    const candidates = trendData.raw.filter((s) => s.ts >= prevHourStart && s.ts < prevHourEnd);
     if (candidates.length > 0) {
       trendData.hourly.push(candidates[candidates.length - 1]);
     }
@@ -618,7 +665,7 @@ function aggregateTiers(snapshot: AssetSnapshot): void {
   if (lastAggregatedDay > 0 && currentDay > lastAggregatedDay) {
     const prevDayEnd = currentDay;
     const prevDayStart = lastAggregatedDay;
-    const candidates = trendData.hourly.filter(s => s.ts >= prevDayStart && s.ts < prevDayEnd);
+    const candidates = trendData.hourly.filter((s) => s.ts >= prevDayStart && s.ts < prevDayEnd);
     if (candidates.length > 0) {
       trendData.daily.push(candidates[candidates.length - 1]);
     }
@@ -633,7 +680,10 @@ export function startAssetTrendCollector(cacheInvalidator?: CacheInvalidator): v
   }
   if (cacheInvalidator) cacheInvalidatorRef = cacheInvalidator;
   loadTrend();
-  logger.info(MODULE, `Loaded trend: raw=${trendData.raw.length} hourly=${trendData.hourly.length} daily=${trendData.daily.length}`);
+  logger.info(
+    MODULE,
+    `Loaded trend: raw=${trendData.raw.length} hourly=${trendData.hourly.length} daily=${trendData.daily.length}`,
+  );
 
   // Collect immediately, then start fixed 5-min interval (independent of operations)
   collectAssetSnapshot().catch(() => {});

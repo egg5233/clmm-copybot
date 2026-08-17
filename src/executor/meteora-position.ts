@@ -1,5 +1,10 @@
 import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync, NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
+import {
+  getAssociatedTokenAddressSync,
+  NATIVE_MINT,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+} from '@solana/spl-token';
 import BN from 'bn.js';
 import DLMM from '@meteora-ag/dlmm';
 import { config } from '../config';
@@ -7,9 +12,25 @@ import { logger } from '../utils/logger';
 import { getUserAddress, signLegacy, signLegacyWithExtra } from '../utils/wallet';
 import { scaleAmount, getAmountRatio } from '../utils/ratio';
 import { PositionMap } from '../state/position-map';
-import { notifyOpenFailed, notifyCloseFailed, notifySolInsufficient, notifyPumpApproval, notifySwapFailed } from '../discord/notify';
-import { isPumpPending, isPumpApproved, isPumpRejected, addPumpPending } from '../state/pump-pending';
-import { swapForToken, getActualSwapOutput, lastSwapError, invalidateHoldingsCache } from './jupiter-swap';
+import {
+  notifyOpenFailed,
+  notifyCloseFailed,
+  notifySolInsufficient,
+  notifyPumpApproval,
+  notifySwapFailed,
+} from '../discord/notify';
+import {
+  isPumpPending,
+  isPumpApproved,
+  isPumpRejected,
+  addPumpPending,
+} from '../state/pump-pending';
+import {
+  swapForToken,
+  getActualSwapOutput,
+  lastSwapError,
+  invalidateHoldingsCache,
+} from './jupiter-swap';
 import { OperationQueue } from './queue';
 import { checkTokenLiquidity } from '../monitor/pool-tvl';
 import * as fs from 'fs';
@@ -51,7 +72,7 @@ async function getMeteoraPairTvl(poolAddress: string): Promise<number | null> {
 
   try {
     const res = await fetch(
-      `https://dlmm-api.meteora.ag/pair/all_by_groups?sort_key=tvl&order_by=desc&search_term=${poolAddress}`
+      `https://dlmm-api.meteora.ag/pair/all_by_groups?sort_key=tvl&order_by=desc&search_term=${poolAddress}`,
     );
     if (!res.ok) return cached?.tvlUsdc ?? null;
 
@@ -70,8 +91,8 @@ async function getMeteoraPairTvl(poolAddress: string): Promise<number | null> {
 }
 
 export class MeteoraPositionExecutor {
-  private connection: Connection;       // Helius — TX execution + SDK ops
-  private readConnection: Connection;   // Alchemy — balance/position reads
+  private connection: Connection; // Helius — TX execution + SDK ops
+  private readConnection: Connection; // Alchemy — balance/position reads
   private positionMap: PositionMap;
   private busy = false;
 
@@ -82,7 +103,7 @@ export class MeteoraPositionExecutor {
   public drawdownWarning = false;
   public lastSkipReason: string | null = null;
   public cachedSolBalance: number | null = null;
-  public rentPerPosition: number = 0.00890880; // fallback, queried from RPC
+  public rentPerPosition: number = 0.0089088; // fallback, queried from RPC
 
   constructor(connection: Connection, positionMap: PositionMap) {
     this.connection = connection;
@@ -91,11 +112,17 @@ export class MeteoraPositionExecutor {
       : connection;
     this.positionMap = positionMap;
 
-    this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+    this.getSolBalance()
+      .then((b) => {
+        this.cachedSolBalance = b;
+      })
+      .catch(() => {});
     logger.info(MODULE, 'MeteoraPositionExecutor initialized');
   }
 
-  get isBusy(): boolean { return this.busy; }
+  get isBusy(): boolean {
+    return this.busy;
+  }
 
   updateConnection(newConn: Connection): void {
     this.connection = newConn;
@@ -150,7 +177,9 @@ export class MeteoraPositionExecutor {
 
   private isTransientError(err: any): boolean {
     const msg = err?.message || '';
-    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(msg);
+    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(
+      msg,
+    );
   }
 
   private isRetryableSimError(err: any): boolean {
@@ -163,7 +192,9 @@ export class MeteoraPositionExecutor {
       const raw = fs.readFileSync('./data/token-names.json', 'utf-8');
       const cache = JSON.parse(raw);
       return cache[mint]?.symbol || mint;
-    } catch { return mint; }
+    } catch {
+      return mint;
+    }
   }
 
   private isTokenBlacklisted(mintX: string, mintY: string): boolean {
@@ -176,7 +207,7 @@ export class MeteoraPositionExecutor {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) {
-          await new Promise(r => setTimeout(r, 3000 * attempt));
+          await new Promise((r) => setTimeout(r, 3000 * attempt));
         }
         const tx = await this.readConnection.getParsedTransaction(txSig, {
           maxSupportedTransactionVersion: 0,
@@ -184,14 +215,20 @@ export class MeteoraPositionExecutor {
         });
         if (!tx?.meta) {
           if (attempt < 2) {
-            logger.debug(MODULE, `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`);
+            logger.debug(
+              MODULE,
+              `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`,
+            );
             continue;
           }
           logger.warn(MODULE, `verifyTxSuccess: TX not found after retries ${txSig.slice(0, 8)}`);
           return false;
         }
         if (tx.meta.err) {
-          logger.error(MODULE, `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`);
+          logger.error(
+            MODULE,
+            `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`,
+          );
           return false;
         }
         return true;
@@ -207,7 +244,10 @@ export class MeteoraPositionExecutor {
     return false;
   }
 
-  private async parseTxTokenChanges(txSig: string, owner: PublicKey): Promise<{ mint: PublicKey; amount: BN }[]> {
+  private async parseTxTokenChanges(
+    txSig: string,
+    owner: PublicKey,
+  ): Promise<{ mint: PublicKey; amount: BN }[]> {
     try {
       const tx = await this.readConnection.getParsedTransaction(txSig, {
         maxSupportedTransactionVersion: 0,
@@ -247,7 +287,13 @@ export class MeteoraPositionExecutor {
 
   private addPendingSwap(mint: PublicKey, amount: BN): void {
     const mintStr = mint.toBase58();
-    if (mintStr === USDC || mintStr === USDT_MINT || mintStr === USDT_T22 || mint.equals(NATIVE_MINT)) return;
+    if (
+      mintStr === USDC ||
+      mintStr === USDT_MINT ||
+      mintStr === USDT_T22 ||
+      mint.equals(NATIVE_MINT)
+    )
+      return;
     if (amount.lte(new BN(0))) return;
 
     const data = this.readPendingFile();
@@ -256,7 +302,10 @@ export class MeteoraPositionExecutor {
     const total = existing.add(amount);
     data[mintStr] = { ...entry, pending: total.toString() };
     this.writePendingFile(data);
-    logger.info(MODULE, `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`);
+    logger.info(
+      MODULE,
+      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`,
+    );
   }
 
   private readPendingFile(): Record<string, any> {
@@ -283,7 +332,10 @@ export class MeteoraPositionExecutor {
    * Meteora SDK returns legacy Transaction objects.
    * SDK may set feePayer/blockhash — we fallback if missing.
    */
-  private async signAndSend(txOrTxs: Transaction | Transaction[], additionalSigners?: Keypair[]): Promise<string> {
+  private async signAndSend(
+    txOrTxs: Transaction | Transaction[],
+    additionalSigners?: Keypair[],
+  ): Promise<string> {
     const txs = Array.isArray(txOrTxs) ? txOrTxs : [txOrTxs];
     const userAddress = getUserAddress();
     let lastSig = '';
@@ -297,9 +349,10 @@ export class MeteoraPositionExecutor {
         tx.recentBlockhash = blockhash;
       }
 
-      const signed = additionalSigners && additionalSigners.length > 0
-        ? await signLegacyWithExtra(tx, additionalSigners)
-        : await signLegacy(tx);
+      const signed =
+        additionalSigners && additionalSigners.length > 0
+          ? await signLegacyWithExtra(tx, additionalSigners)
+          : await signLegacy(tx);
 
       for (let i = 0; i < config.maxRetry; i++) {
         try {
@@ -308,15 +361,22 @@ export class MeteoraPositionExecutor {
             maxRetries: 2,
           });
           const latestBlockhash = await this.connection.getLatestBlockhash();
-          await this.connection.confirmTransaction({
-            signature: sig,
-            ...latestBlockhash,
-          }, 'confirmed');
+          await this.connection.confirmTransaction(
+            {
+              signature: sig,
+              ...latestBlockhash,
+            },
+            'confirmed',
+          );
 
           // BUG FIX: v1.20.2 — verify meta.err after confirmTransaction
-          const txResult = await this.connection.getTransaction(sig, { maxSupportedTransactionVersion: 0 });
+          const txResult = await this.connection.getTransaction(sig, {
+            maxSupportedTransactionVersion: 0,
+          });
           if (txResult?.meta?.err) {
-            throw new Error(`TX confirmed but failed on-chain: ${JSON.stringify(txResult.meta.err)}`);
+            throw new Error(
+              `TX confirmed but failed on-chain: ${JSON.stringify(txResult.meta.err)}`,
+            );
           }
 
           lastSig = sig;
@@ -324,7 +384,7 @@ export class MeteoraPositionExecutor {
         } catch (err: any) {
           if (i === config.maxRetry - 1) throw err;
           logger.warn(MODULE, `Send attempt ${i + 1} failed: ${err.message}, retrying...`);
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
         }
       }
     }
@@ -369,9 +429,15 @@ export class MeteoraPositionExecutor {
       const conn = this.readConnection;
       const rentPosition = await conn.getMinimumBalanceForRentExemption(300);
       this.rentPerPosition = rentPosition / 1e9;
-      logger.info(MODULE, `Rent per position: ${this.rentPerPosition} SOL (${rentPosition} lamports)`);
+      logger.info(
+        MODULE,
+        `Rent per position: ${this.rentPerPosition} SOL (${rentPosition} lamports)`,
+      );
     } catch (err: any) {
-      logger.warn(MODULE, `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`);
+      logger.warn(
+        MODULE,
+        `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`,
+      );
     }
   }
 
@@ -384,7 +450,10 @@ export class MeteoraPositionExecutor {
       }
     }
     if (missing.length === 0) return;
-    logger.info(MODULE, `Backfilling lockedSol for ${missing.length} Meteora positions (${this.rentPerPosition} SOL each)`);
+    logger.info(
+      MODULE,
+      `Backfilling lockedSol for ${missing.length} Meteora positions (${this.rentPerPosition} SOL each)`,
+    );
     for (const targetNft of missing) {
       this.positionMap.setLockedSol(targetNft, this.rentPerPosition);
     }
@@ -406,17 +475,29 @@ export class MeteoraPositionExecutor {
 
     // === PHASE 0: Pre-checks ===
     if (this.positionMap.get(targetPositionAddress)) {
-      logger.warn(MODULE, `Already have mapping for target position ${targetPositionAddress.slice(0, 8)}, skipping`);
+      logger.warn(
+        MODULE,
+        `Already have mapping for target position ${targetPositionAddress.slice(0, 8)}, skipping`,
+      );
       return null;
     }
-    if (this.solPaused) { this.lastSkipReason = 'SOL 不足暫停'; return null; }
-    if (this.drawdownPaused) { this.lastSkipReason = '回撤保護暫停'; return null; }
+    if (this.solPaused) {
+      this.lastSkipReason = 'SOL 不足暫停';
+      return null;
+    }
+    if (this.drawdownPaused) {
+      this.lastSkipReason = '回撤保護暫停';
+      return null;
+    }
     if (config.meteoraCloseOnlyWallets.has(targetWallet)) {
       this.lastSkipReason = 'Close-only 錢包';
       return null;
     }
     if (config.dryRun) {
-      logger.info(MODULE, '[DRY RUN] Would copy open position', { poolAddress, targetPositionAddress });
+      logger.info(MODULE, '[DRY RUN] Would copy open position', {
+        poolAddress,
+        targetPositionAddress,
+      });
       return 'dry-run-meteora-open';
     }
     if (!this.acquire('copyOpenPosition')) return null;
@@ -430,8 +511,11 @@ export class MeteoraPositionExecutor {
 
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Target position not found yet, waiting ${(attempt + 1) * 2}s (attempt ${attempt + 1}/3)...`);
-          await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+          logger.info(
+            MODULE,
+            `Target position not found yet, waiting ${(attempt + 1) * 2}s (attempt ${attempt + 1}/3)...`,
+          );
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
         }
         try {
           dlmmPool = await getCachedDlmmPool(this.readConnection, poolAddress);
@@ -444,7 +528,10 @@ export class MeteoraPositionExecutor {
       }
 
       if (!targetPosData || !dlmmPool) {
-        logger.error(MODULE, `Cannot read target position after retries: ${targetPositionAddress.slice(0, 8)}`);
+        logger.error(
+          MODULE,
+          `Cannot read target position after retries: ${targetPositionAddress.slice(0, 8)}`,
+        );
         return null;
       }
 
@@ -466,18 +553,30 @@ export class MeteoraPositionExecutor {
 
       // 2b. Pump token filter (same tri-state as Orca)
       if (config.pumpFilterMode !== 'off') {
-        const pumpMint = mintXStr.toLowerCase().includes('pump') ? mintXStr
-          : mintYStr.toLowerCase().includes('pump') ? mintYStr : null;
+        const pumpMint = mintXStr.toLowerCase().includes('pump')
+          ? mintXStr
+          : mintYStr.toLowerCase().includes('pump')
+            ? mintYStr
+            : null;
         if (pumpMint) {
           if (!isPumpApproved(pumpMint)) {
             if (config.pumpFilterMode === 'full') {
               this.lastSkipReason = 'Pump 代幣過濾';
               return null;
             }
-            if (isPumpRejected(pumpMint)) { this.lastSkipReason = 'Pump 代幣已拒絕'; return null; }
+            if (isPumpRejected(pumpMint)) {
+              this.lastSkipReason = 'Pump 代幣已拒絕';
+              return null;
+            }
             if (!isPumpPending(pumpMint)) {
               const symbol = this.getTokenSymbol(pumpMint);
-              addPumpPending({ mint: pumpMint, symbol, pool: poolLabel, targetWallet, detectedAt: Date.now() });
+              addPumpPending({
+                mint: pumpMint,
+                symbol,
+                pool: poolLabel,
+                targetWallet,
+                detectedAt: Date.now(),
+              });
               notifyPumpApproval(pumpMint, symbol, poolLabel).catch(() => {});
             }
             this.lastSkipReason = 'Pump 代幣等待確認';
@@ -489,7 +588,8 @@ export class MeteoraPositionExecutor {
       // 2c. Pool TVL filter
       if (config.minPoolTvl > 0) {
         const STABLES = new Set([USDC, USDT_MINT, USDT_T22]);
-        const checkMint = (!STABLES.has(mintXStr) && mintXStr !== NATIVE_MINT.toBase58()) ? mintXStr : mintYStr;
+        const checkMint =
+          !STABLES.has(mintXStr) && mintXStr !== NATIVE_MINT.toBase58() ? mintXStr : mintYStr;
         const tvl = await checkTokenLiquidity(checkMint, () => getMeteoraPairTvl(poolAddress));
         if (tvl === null || tvl < config.minPoolTvl) {
           this.lastSkipReason = `TVL 不足 ($${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl})`;
@@ -516,14 +616,23 @@ export class MeteoraPositionExecutor {
       }
 
       const ratio = getAmountRatio(targetWallet);
-      logger.info(MODULE, `Target amounts: X=${targetAmountX.toString()}, Y=${targetAmountY.toString()}, ratio=${ratio}`);
-      logger.info(MODULE, `Our deposit target: X=${ourTokenX.toString()}, Y=${ourTokenY.toString()}`);
+      logger.info(
+        MODULE,
+        `Target amounts: X=${targetAmountX.toString()}, Y=${targetAmountY.toString()}, ratio=${ratio}`,
+      );
+      logger.info(
+        MODULE,
+        `Our deposit target: X=${ourTokenX.toString()}, Y=${ourTokenY.toString()}`,
+      );
 
       // === PHASE 4: Pre-swap (acquire tokens if insufficient) ===
       // BUG FIX: v1.20.1 — invalidateHoldingsCache + re-read balance after swap
       let balanceX = await this.getTokenBalance(userAddress, mintX);
       let balanceY = await this.getTokenBalance(userAddress, mintY);
-      logger.info(MODULE, `Balances before swap: X=${balanceX.toString()}, Y=${balanceY.toString()}`);
+      logger.info(
+        MODULE,
+        `Balances before swap: X=${balanceX.toString()}, Y=${balanceY.toString()}`,
+      );
 
       // Swap for tokenX if deficit
       if (balanceX.lt(ourTokenX) && !ourTokenX.isZero() && mintXStr !== USDC) {
@@ -549,11 +658,16 @@ export class MeteoraPositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedX = await getActualSwapOutput(this.readConnection, txSig, mintXStr, userAddress.toBase58());
+        const addedX = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintXStr,
+          userAddress.toBase58(),
+        );
         if (addedX) {
           balanceX = balanceX.add(new BN(addedX));
         } else {
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           balanceX = await this.getTokenBalance(userAddress, mintX);
         }
         balanceY = await this.getTokenBalance(userAddress, mintY);
@@ -580,11 +694,16 @@ export class MeteoraPositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedY = await getActualSwapOutput(this.readConnection, txSig, mintYStr, userAddress.toBase58());
+        const addedY = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintYStr,
+          userAddress.toBase58(),
+        );
         if (addedY) {
           balanceY = balanceY.add(new BN(addedY));
         } else {
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           balanceY = await this.getTokenBalance(userAddress, mintY);
         }
       }
@@ -601,23 +720,30 @@ export class MeteoraPositionExecutor {
 
       for (let openAttempt = 0; openAttempt < MAX_OPEN_ATTEMPTS; openAttempt++) {
         if (openAttempt > 0) {
-          logger.info(MODULE, `Retrying open (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying open (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
           balanceX = await this.getTokenBalance(userAddress, mintX);
           balanceY = await this.getTokenBalance(userAddress, mintY);
         }
 
         // BUG FIX: v1.20.2 — cap tokenMax: BN.min(target, balance)
         // BUG FIX: v1.20.8 — LiquidityZero: when one token is 0, use wallet balance
-        const tokenMaxX = ourTokenX.isZero() && !ourTokenY.isZero()
-          ? balanceX : BN.min(ourTokenX, balanceX);
-        const tokenMaxY = ourTokenY.isZero() && !ourTokenX.isZero()
-          ? balanceY : BN.min(ourTokenY, balanceY);
+        const tokenMaxX =
+          ourTokenX.isZero() && !ourTokenY.isZero() ? balanceX : BN.min(ourTokenX, balanceX);
+        const tokenMaxY =
+          ourTokenY.isZero() && !ourTokenX.isZero() ? balanceY : BN.min(ourTokenY, balanceY);
 
-        logger.info(MODULE, `Position params: bins=[${lowerBinId}, ${upperBinId}] (${binCount} bins${binCount > LARGE_BIN_THRESHOLD ? ', multi-TX' : ''})`, {
-          tokenMaxX: tokenMaxX.toString(),
-          tokenMaxY: tokenMaxY.toString(),
-        });
+        logger.info(
+          MODULE,
+          `Position params: bins=[${lowerBinId}, ${upperBinId}] (${binCount} bins${binCount > LARGE_BIN_THRESHOLD ? ', multi-TX' : ''})`,
+          {
+            tokenMaxX: tokenMaxX.toString(),
+            tokenMaxY: tokenMaxY.toString(),
+          },
+        );
 
         try {
           const newPositionKp = Keypair.generate();
@@ -637,7 +763,6 @@ export class MeteoraPositionExecutor {
               },
             });
             txSig = await this.signAndSend(createPositionTx, [newPositionKp]);
-
           } else {
             // v1.24.5: Large position — multi-TX via initializePosition2 + increasePositionLength2
             // Avoids CPI realloc limit of 10,240 bytes per inner instruction
@@ -699,7 +824,10 @@ export class MeteoraPositionExecutor {
               extendCount++;
             }
 
-            logger.info(MODULE, `Multi-TX: init(${initialWidth}) + ${extendCount} extend(s) → ${binCount} bins`);
+            logger.info(
+              MODULE,
+              `Multi-TX: init(${initialWidth}) + ${extendCount} extend(s) → ${binCount} bins`,
+            );
             const initSig = await this.signAndSend(initTx, [newPositionKp]);
             const initOk = await this.verifyTxSuccess(initSig);
             if (!initOk) {
@@ -742,11 +870,14 @@ export class MeteoraPositionExecutor {
 
           // Store target liquidity at open time for partial decrease tracking
           try {
-            const targetTotalLiq = new BN(targetPosData.positionData.totalXAmount)
-              .add(new BN(targetPosData.positionData.totalYAmount));
+            const targetTotalLiq = new BN(targetPosData.positionData.totalXAmount).add(
+              new BN(targetPosData.positionData.totalYAmount),
+            );
             this.positionMap.setTargetLiquidity(targetPositionAddress, targetTotalLiq.toString());
             logger.debug(MODULE, `Stored targetLiquidity at open: ${targetTotalLiq.toString()}`);
-          } catch { /* non-critical */ }
+          } catch {
+            /* non-critical */
+          }
 
           const success = await this.verifyTxSuccess(txSig);
           if (!success) {
@@ -756,19 +887,26 @@ export class MeteoraPositionExecutor {
             return null;
           }
 
-          logger.info(MODULE, `Position opened: ${txSig} (pos=${newPositionKp.publicKey.toBase58().slice(0, 8)})`);
+          logger.info(
+            MODULE,
+            `Position opened: ${txSig} (pos=${newPositionKp.publicKey.toBase58().slice(0, 8)})`,
+          );
           return txSig;
-
         } catch (openErr: any) {
-          if (openAttempt < MAX_OPEN_ATTEMPTS - 1 && (this.isRetryableSimError(openErr) || this.isTransientError(openErr))) {
-            logger.warn(MODULE, `Open attempt ${openAttempt + 1} failed (${(openErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            openAttempt < MAX_OPEN_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(openErr) || this.isTransientError(openErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Open attempt ${openAttempt + 1} failed (${(openErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw openErr;
         }
       }
       return null;
-
     } catch (err: any) {
       logger.error(MODULE, `Open position failed: ${err.message}`);
       notifyOpenFailed(err, targetPositionAddress);
@@ -782,7 +920,11 @@ export class MeteoraPositionExecutor {
     } finally {
       // === PHASE 6: Cleanup ===
       this.release();
-      this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+      this.getSolBalance()
+        .then((b) => {
+          this.cachedSolBalance = b;
+        })
+        .catch(() => {});
     }
   }
 
@@ -808,7 +950,7 @@ export class MeteoraPositionExecutor {
       for (let attempt = 0; attempt < MAX_CLOSE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
           logger.info(MODULE, `Retrying close (attempt ${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -830,7 +972,10 @@ export class MeteoraPositionExecutor {
             const msg = err?.message || '';
             // SDK throws "Position account ... not found" when getAccountInfo returns null
             if (msg.includes('not found')) {
-              logger.warn(MODULE, `Position confirmed closed on-chain: ${myPositionAddress}, deleting mapping`);
+              logger.warn(
+                MODULE,
+                `Position confirmed closed on-chain: ${myPositionAddress}, deleting mapping`,
+              );
               this.positionMap.delete(targetPositionAddress);
               return null;
             }
@@ -865,10 +1010,15 @@ export class MeteoraPositionExecutor {
           const closeSig = await this.signAndSend(closeTx);
           logger.info(MODULE, `Close position TX: ${closeSig}`);
           lastTxSig = closeSig;
-
         } catch (closeErr: any) {
-          if (attempt < MAX_CLOSE_ATTEMPTS - 1 && (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))) {
-            logger.warn(MODULE, `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_CLOSE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw closeErr;
@@ -885,8 +1035,15 @@ export class MeteoraPositionExecutor {
           lastTxSig = null;
           continue;
         }
-        logger.error(MODULE, `Close TX failed after ${MAX_CLOSE_ATTEMPTS} attempts, keeping mapping`);
-        notifyCloseFailed(myPositionAddress, 'on-chain failure after max attempts', MAX_CLOSE_ATTEMPTS);
+        logger.error(
+          MODULE,
+          `Close TX failed after ${MAX_CLOSE_ATTEMPTS} attempts, keeping mapping`,
+        );
+        notifyCloseFailed(
+          myPositionAddress,
+          'on-chain failure after max attempts',
+          MAX_CLOSE_ATTEMPTS,
+        );
         return null;
       }
 
@@ -899,14 +1056,19 @@ export class MeteoraPositionExecutor {
       // BUG FIX: v1.20.2 — parse TX for received tokens -> queue as pending swaps
       const received = await this.parseTxTokenChanges(lastTxSig, userAddress);
       for (const { mint, amount } of received) {
-        logger.info(MODULE, `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`);
+        logger.info(
+          MODULE,
+          `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`,
+        );
         this.addPendingSwap(mint, amount);
       }
 
       return lastTxSig;
-
     } catch (err: any) {
-      logger.error(MODULE, `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`);
+      logger.error(
+        MODULE,
+        `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`,
+      );
       notifyCloseFailed(myPositionAddress, err, 0);
       return null;
     } finally {
@@ -940,7 +1102,7 @@ export class MeteoraPositionExecutor {
       const userAddress = getUserAddress();
 
       // BUG FIX: v1.20.9 — 2s initial delay (freshly detected increase TX may not be on-chain)
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
 
       const poolAddress = this.getPoolAddressForPosition(targetPositionAddress);
       if (!poolAddress) return null;
@@ -963,26 +1125,32 @@ export class MeteoraPositionExecutor {
       for (let readAttempt = 0; readAttempt < 2; readAttempt++) {
         if (readAttempt > 0) {
           logger.info(MODULE, 'Delta <= 0 after detecting add TX, waiting 3s for RPC...');
-          await new Promise(r => setTimeout(r, 3000));
+          await new Promise((r) => setTimeout(r, 3000));
         }
 
         const targetPositions = await dlmmPool.getPositionsByUserAndLbPair(
-          new PublicKey(targetWalletAddr)
+          new PublicKey(targetWalletAddr),
         );
         const targetPos = targetPositions.userPositions.find(
-          (p: any) => p.publicKey.toBase58() === targetPositionAddress
+          (p: any) => p.publicKey.toBase58() === targetPositionAddress,
         );
         if (!targetPos) {
           logger.warn(MODULE, 'Cannot read target position for add');
           return null;
         }
 
-        const targetAmountX = scaleAmount(new BN(targetPos.positionData.totalXAmount), targetWallet);
-        const targetAmountY = scaleAmount(new BN(targetPos.positionData.totalYAmount), targetWallet);
+        const targetAmountX = scaleAmount(
+          new BN(targetPos.positionData.totalXAmount),
+          targetWallet,
+        );
+        const targetAmountY = scaleAmount(
+          new BN(targetPos.positionData.totalYAmount),
+          targetWallet,
+        );
 
         const ourPositions = await dlmmPool.getPositionsByUserAndLbPair(userAddress);
         const ourPos = ourPositions.userPositions.find(
-          (p: any) => p.publicKey.toBase58() === myPositionAddress
+          (p: any) => p.publicKey.toBase58() === myPositionAddress,
         );
         if (!ourPos) {
           logger.warn(MODULE, 'Cannot read our position for add');
@@ -1030,9 +1198,16 @@ export class MeteoraPositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedX = await getActualSwapOutput(this.readConnection, txSig, mintXStr, userAddress.toBase58());
-        if (addedX) { balanceX = balanceX.add(new BN(addedX)); } else {
-          await new Promise(r => setTimeout(r, 5000));
+        const addedX = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintXStr,
+          userAddress.toBase58(),
+        );
+        if (addedX) {
+          balanceX = balanceX.add(new BN(addedX));
+        } else {
+          await new Promise((r) => setTimeout(r, 5000));
           balanceX = await this.getTokenBalance(userAddress, mintX);
         }
         balanceY = await this.getTokenBalance(userAddress, mintY);
@@ -1056,9 +1231,16 @@ export class MeteoraPositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedY = await getActualSwapOutput(this.readConnection, txSig, mintYStr, userAddress.toBase58());
-        if (addedY) { balanceY = balanceY.add(new BN(addedY)); } else {
-          await new Promise(r => setTimeout(r, 5000));
+        const addedY = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintYStr,
+          userAddress.toBase58(),
+        );
+        if (addedY) {
+          balanceY = balanceY.add(new BN(addedY));
+        } else {
+          await new Promise((r) => setTimeout(r, 5000));
           balanceY = await this.getTokenBalance(userAddress, mintY);
         }
       }
@@ -1067,17 +1249,17 @@ export class MeteoraPositionExecutor {
       const MAX_ADD_ATTEMPTS = 2;
       for (let addAttempt = 0; addAttempt < MAX_ADD_ATTEMPTS; addAttempt++) {
         if (addAttempt > 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
           balanceX = await this.getTokenBalance(userAddress, mintX);
           balanceY = await this.getTokenBalance(userAddress, mintY);
         }
 
         // BUG FIX: v1.20.2 — cap tokenMax: BN.min(delta, balance)
         // BUG FIX: v1.20.8 — LiquidityZero: when one delta is 0, use balance
-        const tokenMaxX = increaseX.isZero() && !increaseY.isZero()
-          ? balanceX : BN.min(increaseX, balanceX);
-        const tokenMaxY = increaseY.isZero() && !increaseX.isZero()
-          ? balanceY : BN.min(increaseY, balanceY);
+        const tokenMaxX =
+          increaseX.isZero() && !increaseY.isZero() ? balanceX : BN.min(increaseX, balanceX);
+        const tokenMaxY =
+          increaseY.isZero() && !increaseX.isZero() ? balanceY : BN.min(increaseY, balanceY);
 
         try {
           const addTx = await dlmmPool.addLiquidityByStrategy({
@@ -1098,22 +1280,29 @@ export class MeteoraPositionExecutor {
 
           // Update stored targetLiquidity so partial decrease calculations remain correct
           try {
-            const targetPositions = await dlmmPool.getPositionsByUserAndLbPair(new PublicKey(targetWalletAddr));
+            const targetPositions = await dlmmPool.getPositionsByUserAndLbPair(
+              new PublicKey(targetWalletAddr),
+            );
             const updatedTargetPos = targetPositions.userPositions.find(
-              (p: any) => p.publicKey.toBase58() === targetPositionAddress
+              (p: any) => p.publicKey.toBase58() === targetPositionAddress,
             );
             if (updatedTargetPos) {
-              const newTargetLiq = new BN(updatedTargetPos.positionData.totalXAmount)
-                .add(new BN(updatedTargetPos.positionData.totalYAmount));
+              const newTargetLiq = new BN(updatedTargetPos.positionData.totalXAmount).add(
+                new BN(updatedTargetPos.positionData.totalYAmount),
+              );
               this.positionMap.setTargetLiquidity(targetPositionAddress, newTargetLiq.toString());
               logger.debug(MODULE, `Updated targetLiquidity after add: ${newTargetLiq.toString()}`);
             }
-          } catch { /* non-critical */ }
+          } catch {
+            /* non-critical */
+          }
 
           return txSig;
-
         } catch (addErr: any) {
-          if (addAttempt < MAX_ADD_ATTEMPTS - 1 && (this.isRetryableSimError(addErr) || this.isTransientError(addErr))) {
+          if (
+            addAttempt < MAX_ADD_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(addErr) || this.isTransientError(addErr))
+          ) {
             logger.warn(MODULE, `Add attempt ${addAttempt + 1} failed, retrying...`);
             continue;
           }
@@ -1121,7 +1310,6 @@ export class MeteoraPositionExecutor {
         }
       }
       return null;
-
     } catch (err: any) {
       logger.error(MODULE, `Add liquidity failed: ${err.message}`);
       return null;
@@ -1154,15 +1342,20 @@ export class MeteoraPositionExecutor {
 
       if (targetWalletAddr) {
         try {
-          const targetPositions = await dlmmPool.getPositionsByUserAndLbPair(new PublicKey(targetWalletAddr));
+          const targetPositions = await dlmmPool.getPositionsByUserAndLbPair(
+            new PublicKey(targetWalletAddr),
+          );
           const targetPos = targetPositions.userPositions.find(
-            (p: any) => p.publicKey.toBase58() === targetPositionAddress
+            (p: any) => p.publicKey.toBase58() === targetPositionAddress,
           );
           if (targetPos) {
-            targetCurrentLiq = new BN(targetPos.positionData.totalXAmount)
-              .add(new BN(targetPos.positionData.totalYAmount));
+            targetCurrentLiq = new BN(targetPos.positionData.totalXAmount).add(
+              new BN(targetPos.positionData.totalYAmount),
+            );
           }
-        } catch { /* target position may be closed already — treat as full remove */ }
+        } catch {
+          /* target position may be closed already — treat as full remove */
+        }
       }
 
       // Determine remove BPS by comparing target's current vs stored liquidity
@@ -1178,18 +1371,27 @@ export class MeteoraPositionExecutor {
             removeBps = removedLiq.mul(new BN(10000)).div(storedLiq).toNumber();
             if (removeBps <= 0) removeBps = 0;
             if (removeBps > 10000) removeBps = 10000;
-            logger.info(MODULE, `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (${removeBps / 100}%)`);
+            logger.info(
+              MODULE,
+              `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (${removeBps / 100}%)`,
+            );
 
             // Update stored target liquidity for next decrease
             this.positionMap.setTargetLiquidity(targetPositionAddress, targetCurrentLiq.toString());
           } else {
             // Target liquidity >= stored — likely fee collection only (increase happened?)
-            logger.info(MODULE, `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`);
+            logger.info(
+              MODULE,
+              `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`,
+            );
             removeBps = 0;
           }
         } else {
           // No stored liquidity (legacy position) — safe fallback to fee collection
-          logger.info(MODULE, `No stored targetLiquidity for ${targetPositionAddress}, collecting fees (legacy position)`);
+          logger.info(
+            MODULE,
+            `No stored targetLiquidity for ${targetPositionAddress}, collecting fees (legacy position)`,
+          );
           removeBps = 0;
         }
       }
@@ -1203,7 +1405,7 @@ export class MeteoraPositionExecutor {
           try {
             const feePositions = await dlmmPool.getPositionsByUserAndLbPair(userAddress);
             const feePosObj = feePositions.userPositions.find(
-              (p: any) => p.publicKey.toBase58() === myPositionAddress
+              (p: any) => p.publicKey.toBase58() === myPositionAddress,
             );
             if (!feePosObj) {
               logger.warn(MODULE, 'Position not found for fee collection');
@@ -1231,14 +1433,17 @@ export class MeteoraPositionExecutor {
       // Partial or full decrease
       const actualBps = removeBps ?? 10000;
       const isPartial = removeBps !== null && removeBps < 10000;
-      logger.info(MODULE, `${isPartial ? 'Partial' : 'Full'} decrease: bps=${actualBps} for position ${myPositionAddress}`);
+      logger.info(
+        MODULE,
+        `${isPartial ? 'Partial' : 'Full'} decrease: bps=${actualBps} for position ${myPositionAddress}`,
+      );
 
       const MAX_DECREASE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_DECREASE_ATTEMPTS; attempt++) {
         try {
           const ourPositions = await dlmmPool.getPositionsByUserAndLbPair(userAddress);
           const ourPos = ourPositions.userPositions.find(
-            (p: any) => p.publicKey.toBase58() === myPositionAddress
+            (p: any) => p.publicKey.toBase58() === myPositionAddress,
           );
           if (!ourPos) {
             logger.warn(MODULE, 'Our position not found for decrease');
@@ -1264,21 +1469,24 @@ export class MeteoraPositionExecutor {
             try {
               const received = await this.parseTxTokenChanges(lastSig, userAddress);
               for (const { mint, amount } of received) {
-                logger.info(MODULE, `Received from decrease: ${mint.toBase58()} = ${amount.toString()}`);
+                logger.info(
+                  MODULE,
+                  `Received from decrease: ${mint.toBase58()} = ${amount.toString()}`,
+                );
                 this.addPendingSwap(mint, amount);
               }
-            } catch { /* non-critical */ }
+            } catch {
+              /* non-critical */
+            }
 
             return { txSig: lastSig, type: 'DECREASE' };
           }
-
         } catch (err: any) {
           if (attempt < MAX_DECREASE_ATTEMPTS - 1 && this.isTransientError(err)) continue;
           throw err;
         }
       }
       return null;
-
     } catch (err: any) {
       logger.error(MODULE, `Remove liquidity failed: ${err.message}`);
       return null;
@@ -1304,10 +1512,13 @@ export class MeteoraPositionExecutor {
       // Need LbPosition object for claimAllSwapFee
       const allPositions = await dlmmPool.getPositionsByUserAndLbPair(userAddress);
       const posObj = allPositions.userPositions.find(
-        (p: any) => p.publicKey.toBase58() === ourPositionAddress
+        (p: any) => p.publicKey.toBase58() === ourPositionAddress,
       );
       if (!posObj) {
-        logger.warn(MODULE, `Position not found for fee collection: ${ourPositionAddress.slice(0, 8)}`);
+        logger.warn(
+          MODULE,
+          `Position not found for fee collection: ${ourPositionAddress.slice(0, 8)}`,
+        );
         return null;
       }
 
@@ -1325,7 +1536,6 @@ export class MeteoraPositionExecutor {
       }
 
       return lastSig || null;
-
     } catch (err: any) {
       logger.error(MODULE, `Fee collection failed: ${err.message}`);
       return null;
@@ -1339,7 +1549,10 @@ export class MeteoraPositionExecutor {
   async manualClosePosition(ourPositionAddress: string): Promise<string | null> {
     const targetNft = this.positionMap.findByOurNft(ourPositionAddress);
     if (!targetNft) {
-      logger.warn(MODULE, `Manual close: no mapping found for our position ${ourPositionAddress.slice(0, 8)}`);
+      logger.warn(
+        MODULE,
+        `Manual close: no mapping found for our position ${ourPositionAddress.slice(0, 8)}`,
+      );
       return null;
     }
     return this.copyClosePosition(targetNft);
@@ -1356,7 +1569,9 @@ export class MeteoraPositionExecutor {
 
   async reconcileMeteoraPositions(_opQueue: OperationQueue): Promise<void> {
     const allEntries = this.positionMap.toJSON();
-    const meteoraEntries = Object.entries(allEntries).filter(([_, e]) => (e as any).dex === 'meteora');
+    const meteoraEntries = Object.entries(allEntries).filter(
+      ([_, e]) => (e as any).dex === 'meteora',
+    );
 
     if (meteoraEntries.length === 0) return;
     logger.info(MODULE, `Reconciling ${meteoraEntries.length} Meteora positions...`);
@@ -1367,10 +1582,13 @@ export class MeteoraPositionExecutor {
       try {
         const acct = await this.readConnection.getAccountInfo(new PublicKey(entry.ourNft));
         if (!acct) {
-          logger.warn(MODULE, `Orphan: position ${entry.ourNft.slice(0, 8)} no longer exists on-chain, removing mapping`);
+          logger.warn(
+            MODULE,
+            `Orphan: position ${entry.ourNft.slice(0, 8)} no longer exists on-chain, removing mapping`,
+          );
           this.positionMap.delete(targetPos);
         }
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 200));
       } catch (err: any) {
         if (this.isTransientError(err)) {
           logger.debug(MODULE, `Reconcile skipped ${targetPos.slice(0, 8)}: transient error`);
@@ -1416,7 +1634,9 @@ export class MeteoraPositionExecutor {
     let count = 0;
 
     const allEntries = this.positionMap.toJSON();
-    const meteoraEntries = Object.entries(allEntries).filter(([_, e]) => (e as any).dex === 'meteora');
+    const meteoraEntries = Object.entries(allEntries).filter(
+      ([_, e]) => (e as any).dex === 'meteora',
+    );
     if (meteoraEntries.length === 0) return { lpUsd: 0, feeUsd: 0, count: 0 };
 
     const lpTotals = new Map<string, number>();
@@ -1460,9 +1680,12 @@ export class MeteoraPositionExecutor {
         mintsNeeded.add(mintYStr);
         count++;
       } catch (err: any) {
-        logger.debug(MODULE, `getMeteoraLpDetails: error reading ${entry.ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`);
+        logger.debug(
+          MODULE,
+          `getMeteoraLpDetails: error reading ${entry.ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`,
+        );
       }
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     if (mintsNeeded.size === 0) return { lpUsd: 0, feeUsd: 0, count: 0 };
@@ -1474,7 +1697,7 @@ export class MeteoraPositionExecutor {
         headers: config.jupApiKey ? { 'x-api-key': config.jupApiKey } : {},
       });
       if (res.ok) {
-        const json = await res.json() as any;
+        const json = (await res.json()) as any;
         for (const [mint, info] of Object.entries(json || {})) {
           const p = (info as any)?.usdPrice;
           if (p) prices[mint] = parseFloat(String(p));
@@ -1491,22 +1714,54 @@ export class MeteoraPositionExecutor {
       totalFeeUsd += amount * (prices[mint] || 0);
     }
 
-    logger.info(MODULE, `Meteora LP: $${totalLpUsd.toFixed(2)} + fees $${totalFeeUsd.toFixed(2)} (${count} positions)`);
+    logger.info(
+      MODULE,
+      `Meteora LP: $${totalLpUsd.toFixed(2)} + fees $${totalFeeUsd.toFixed(2)} (${count} positions)`,
+    );
     return { lpUsd: +totalLpUsd.toFixed(2), feeUsd: +totalFeeUsd.toFixed(2), count };
   }
 
-  private _lpAssetsCache: { items: Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>; ts: number } | null = null;
+  private _lpAssetsCache: {
+    items: Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+    }>;
+    ts: number;
+  } | null = null;
 
-  async getPositionAssets(): Promise<Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number; poolTvl?: number | null }>> {
+  async getPositionAssets(): Promise<
+    Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+      poolTvl?: number | null;
+    }>
+  > {
     if (this._lpAssetsCache && Date.now() - this._lpAssetsCache.ts < 5 * 60 * 1000) {
       return this._lpAssetsCache.items;
     }
 
     const allEntries = this.positionMap.toJSON();
-    const meteoraEntries = Object.entries(allEntries).filter(([_, e]) => (e as any).dex === 'meteora');
+    const meteoraEntries = Object.entries(allEntries).filter(
+      ([_, e]) => (e as any).dex === 'meteora',
+    );
     if (meteoraEntries.length === 0) return [];
 
-    const totals = new Map<string, { balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number; poolTvl: number | null }>();
+    const totals = new Map<
+      string,
+      {
+        balance: number;
+        decimals: number;
+        pairedStable: Record<string, number>;
+        liquidityUsd: number;
+        poolTvl: number | null;
+      }
+    >();
     const mintsNeeded = new Set<string>();
 
     for (const [targetPos] of meteoraEntries) {
@@ -1529,13 +1784,25 @@ export class MeteoraPositionExecutor {
 
         const poolTvl = await getMeteoraPairTvl(poolAddress);
 
-        const eX = totals.get(mintXStr) || { balance: 0, decimals: decX, pairedStable: {}, liquidityUsd: 0, poolTvl: null };
+        const eX = totals.get(mintXStr) || {
+          balance: 0,
+          decimals: decX,
+          pairedStable: {},
+          liquidityUsd: 0,
+          poolTvl: null,
+        };
         eX.balance += lpX;
         eX.pairedStable[mintYStr] = (eX.pairedStable[mintYStr] || 0) + lpY;
         if (poolTvl !== null) eX.poolTvl = poolTvl;
         totals.set(mintXStr, eX);
 
-        const eY = totals.get(mintYStr) || { balance: 0, decimals: decY, pairedStable: {}, liquidityUsd: 0, poolTvl: null };
+        const eY = totals.get(mintYStr) || {
+          balance: 0,
+          decimals: decY,
+          pairedStable: {},
+          liquidityUsd: 0,
+          poolTvl: null,
+        };
         eY.balance += lpY;
         eY.pairedStable[mintXStr] = (eY.pairedStable[mintXStr] || 0) + lpX;
         if (poolTvl !== null) eY.poolTvl = poolTvl;
@@ -1544,18 +1811,24 @@ export class MeteoraPositionExecutor {
         mintsNeeded.add(mintXStr);
         mintsNeeded.add(mintYStr);
       } catch (err: any) {
-        logger.debug(MODULE, `getPositionAssets: error reading position: ${(err.message || '').slice(0, 80)}`);
+        logger.debug(
+          MODULE,
+          `getPositionAssets: error reading position: ${(err.message || '').slice(0, 80)}`,
+        );
       }
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     if (mintsNeeded.size > 0 && config.jupApiKey) {
       try {
-        const res = await fetch(`https://api.jup.ag/price/v3?ids=${Array.from(mintsNeeded).join(',')}`, {
-          headers: { 'x-api-key': config.jupApiKey },
-        });
+        const res = await fetch(
+          `https://api.jup.ag/price/v3?ids=${Array.from(mintsNeeded).join(',')}`,
+          {
+            headers: { 'x-api-key': config.jupApiKey },
+          },
+        );
         if (res.ok) {
-          const json = await res.json() as any;
+          const json = (await res.json()) as any;
           for (const [mint, info] of Object.entries(json || {})) {
             const p = (info as any)?.usdPrice;
             if (p) {
@@ -1564,11 +1837,18 @@ export class MeteoraPositionExecutor {
             }
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     const items = [...totals.entries()].map(([mint, d]) => ({
-      mint, balance: +d.balance.toFixed(6), decimals: d.decimals, pairedStable: d.pairedStable, liquidityUsd: +d.liquidityUsd.toFixed(2), poolTvl: d.poolTvl,
+      mint,
+      balance: +d.balance.toFixed(6),
+      decimals: d.decimals,
+      pairedStable: d.pairedStable,
+      liquidityUsd: +d.liquidityUsd.toFixed(2),
+      poolTvl: d.poolTvl,
     }));
     this._lpAssetsCache = { items, ts: Date.now() };
     return items;

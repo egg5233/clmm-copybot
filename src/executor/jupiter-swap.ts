@@ -27,7 +27,7 @@ async function getInputBalance(inputMint: string): Promise<bigint | null> {
       headers: config.jupApiKey ? { 'x-api-key': config.jupApiKey } : {},
     });
     if (!res.ok) return null;
-    const json = await res.json() as any;
+    const json = (await res.json()) as any;
     const balances: Record<string, bigint> = {};
     if (json.tokens && typeof json.tokens === 'object') {
       for (const [mint, accounts] of Object.entries(json.tokens)) {
@@ -157,7 +157,11 @@ export async function swapForToken(
   });
 
   if (config.dryRun) {
-    logger.info(MODULE, '[DRY RUN] Would swap for token', { inputMint, outputMint, outputAmountRaw });
+    logger.info(MODULE, '[DRY RUN] Would swap for token', {
+      inputMint,
+      outputMint,
+      outputAmountRaw,
+    });
     return 'dry-run-swap';
   }
 
@@ -176,7 +180,7 @@ export async function swapForToken(
     if (!probeRes.ok) {
       throw new Error(`Probe quote ${probeRes.status}: ${await probeRes.text()}`);
     }
-    const data = await probeRes.json() as any;
+    const data = (await probeRes.json()) as any;
     if (data.error || data.errorCode) {
       throw new Error(data.errorCode || data.error);
     }
@@ -198,7 +202,10 @@ export async function swapForToken(
   const desiredOutput = BigInt(outputAmountRaw);
   const neededInput = (desiredOutput * probeIn) / probeOut;
 
-  logger.info(MODULE, `Rate: ${probeIn}in/${probeOut}out, swapping ${neededInput} input for ~${desiredOutput} output`);
+  logger.info(
+    MODULE,
+    `Rate: ${probeIn}in/${probeOut}out, swapping ${neededInput} input for ~${desiredOutput} output`,
+  );
 
   // Step 3: Real quote with calculated input
   const quoteParams = new URLSearchParams({
@@ -215,7 +222,7 @@ export async function swapForToken(
     if (!quoteRes.ok) {
       throw new Error(`Quote ${quoteRes.status}: ${await quoteRes.text()}`);
     }
-    const data = await quoteRes.json() as any;
+    const data = (await quoteRes.json()) as any;
     if (data.error || data.errorCode) {
       throw new Error(data.errorCode || data.error);
     }
@@ -226,17 +233,28 @@ export async function swapForToken(
     return null;
   }
 
-  logger.info(MODULE, `Quote: in=${quote.inAmount} -> out=${quote.outAmount} (target ${outputAmountRaw})`);
+  logger.info(
+    MODULE,
+    `Quote: in=${quote.inAmount} -> out=${quote.outAmount} (target ${outputAmountRaw})`,
+  );
 
   // Step 3b: Check input token balance before sending TX
   const inputBalance = await getInputBalance(inputMint);
   if (inputBalance !== null && inputBalance < BigInt(quote.inAmount)) {
-    const decimals = inputMint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' ? 6
-      : inputMint === 'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5' ? 6
-      : inputMint === 'So11111111111111111111111111111111111111112' ? 9 : 6;
+    const decimals =
+      inputMint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+        ? 6
+        : inputMint === 'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5'
+          ? 6
+          : inputMint === 'So11111111111111111111111111111111111111112'
+            ? 9
+            : 6;
     const need = (Number(BigInt(quote.inAmount)) / 10 ** decimals).toFixed(4);
     const have = (Number(inputBalance) / 10 ** decimals).toFixed(4);
-    logger.warn(MODULE, `Insufficient input balance: need ${need}, have ${have} (${inputMint.slice(0, 8)})`);
+    logger.warn(
+      MODULE,
+      `Insufficient input balance: need ${need}, have ${have} (${inputMint.slice(0, 8)})`,
+    );
     lastSwapError = `餘額不足 (需要 ${need}, 只有 ${have})`;
     return null;
   }
@@ -269,7 +287,9 @@ async function metisSwap(
   amount: string,
 ): Promise<string | null> {
   const quoteParams = new URLSearchParams({
-    inputMint, outputMint, amount,
+    inputMint,
+    outputMint,
+    amount,
     slippageBps: config.slippageBps.toString(),
     maxAccounts: '64',
   });
@@ -278,7 +298,7 @@ async function metisSwap(
   try {
     const quoteRes = await jupiterFetch(`${config.jupiterApiBase}/quote?${quoteParams}`);
     if (!quoteRes.ok) throw new Error(`Quote ${quoteRes.status}: ${await quoteRes.text()}`);
-    const data = await quoteRes.json() as any;
+    const data = (await quoteRes.json()) as any;
     if (data.error || data.errorCode) throw new Error(data.errorCode || data.error);
     quote = data as JupiterQuoteResponse;
   } catch (err: any) {
@@ -341,7 +361,9 @@ async function ultraSwap(
 
   // Step 1: Order
   const orderParams = new URLSearchParams({
-    inputMint, outputMint, amount,
+    inputMint,
+    outputMint,
+    amount,
     taker: getUserAddress().toBase58(),
   });
 
@@ -378,7 +400,7 @@ async function ultraSwap(
     });
     if (!execRes.ok) throw new Error(`Execute ${execRes.status}: ${await execRes.text()}`);
 
-    const result = await execRes.json() as any;
+    const result = (await execRes.json()) as any;
     if (result.status === 'Success' && result.signature) {
       logger.info(MODULE, `Ultra swap done: ${result.signature}`);
       invalidateHoldingsCache();
@@ -404,9 +426,13 @@ export async function swapViaByrealPool(
   outputMint: PublicKey,
   outputAmountRaw: string,
 ): Promise<string | null> {
-  logger.info(MODULE, `Byreal pool swap: ${inputMint.toBase58().slice(0, 8)}... -> ${outputMint.toBase58().slice(0, 8)}...`, {
-    desiredOutput: outputAmountRaw,
-  });
+  logger.info(
+    MODULE,
+    `Byreal pool swap: ${inputMint.toBase58().slice(0, 8)}... -> ${outputMint.toBase58().slice(0, 8)}...`,
+    {
+      desiredOutput: outputAmountRaw,
+    },
+  );
 
   if (config.dryRun) {
     logger.info(MODULE, '[DRY RUN] Would swap via Byreal pool', { outputAmountRaw });
@@ -425,14 +451,17 @@ export async function swapViaByrealPool(
       logger.warn(MODULE, 'Byreal pool: insufficient liquidity for full swap');
     }
 
-    logger.info(MODULE, `Byreal quote: need ${quoteReturn.maxAmountIn.toString()} input for ${quoteReturn.amountOut.toString()} output`);
+    logger.info(
+      MODULE,
+      `Byreal quote: need ${quoteReturn.maxAmountIn.toString()} input for ${quoteReturn.amountOut.toString()} output`,
+    );
 
     // Fix SDK bug: executionPrice (post-swap sqrt price) causes 0x177d SqrtPriceLimitOverflow
     // when pool price moves between quote and TX landing. Use safe boundary instead.
     const zeroForOne = !quoteReturn.isOutputMintA;
     quoteReturn.executionPrice = zeroForOne
-      ? new BN('4295048017')                      // MIN_SQRT_PRICE_X64 + 1
-      : new BN('79226673521066979257578248090');   // MAX_SQRT_PRICE_X64 - 1
+      ? new BN('4295048017') // MIN_SQRT_PRICE_X64 + 1
+      : new BN('79226673521066979257578248090'); // MAX_SQRT_PRICE_X64 - 1
 
     const txSig = await chain.swapExactOut({
       poolInfo,
@@ -464,7 +493,7 @@ export async function getActualSwapOutput(
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       if (attempt > 0) {
-        await new Promise(r => setTimeout(r, 3000 * attempt));
+        await new Promise((r) => setTimeout(r, 3000 * attempt));
       }
       const txInfo = await connection.getParsedTransaction(txSig, {
         commitment: 'confirmed',
@@ -472,7 +501,10 @@ export async function getActualSwapOutput(
       });
       if (!txInfo?.meta) {
         if (attempt < 2) {
-          logger.debug(MODULE, `getActualSwapOutput: TX not indexed yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`);
+          logger.debug(
+            MODULE,
+            `getActualSwapOutput: TX not indexed yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`,
+          );
           continue;
         }
         return null;
@@ -481,8 +513,8 @@ export async function getActualSwapOutput(
       const pre = txInfo.meta.preTokenBalances || [];
       const post = txInfo.meta.postTokenBalances || [];
 
-      const preBal = pre.find(b => b.mint === outputMint && b.owner === walletAddress);
-      const postBal = post.find(b => b.mint === outputMint && b.owner === walletAddress);
+      const preBal = pre.find((b) => b.mint === outputMint && b.owner === walletAddress);
+      const postBal = post.find((b) => b.mint === outputMint && b.owner === walletAddress);
 
       const preAmount = BigInt(preBal?.uiTokenAmount?.amount || '0');
       const postAmount = BigInt(postBal?.uiTokenAmount?.amount || '0');
@@ -501,10 +533,7 @@ export async function getActualSwapOutput(
   return null;
 }
 
-async function sendWithRetry(
-  connection: Connection,
-  tx: VersionedTransaction,
-): Promise<string> {
+async function sendWithRetry(connection: Connection, tx: VersionedTransaction): Promise<string> {
   for (let i = 0; i < config.maxRetry; i++) {
     try {
       const sig = await connection.sendTransaction(tx, {
@@ -513,10 +542,13 @@ async function sendWithRetry(
       });
       // Wait for confirmation
       const latestBlockhash = await connection.getLatestBlockhash();
-      await connection.confirmTransaction({
-        signature: sig,
-        ...latestBlockhash,
-      }, 'confirmed');
+      await connection.confirmTransaction(
+        {
+          signature: sig,
+          ...latestBlockhash,
+        },
+        'confirmed',
+      );
       // Verify the transaction actually succeeded (confirmTransaction doesn't check meta.err)
       const txResult = await connection.getTransaction(sig, { maxSupportedTransactionVersion: 0 });
       if (txResult?.meta?.err) {
@@ -526,7 +558,7 @@ async function sendWithRetry(
     } catch (err: any) {
       if (i === config.maxRetry - 1) throw err;
       logger.warn(MODULE, `Send attempt ${i + 1} failed: ${err.message}, retrying...`);
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
   throw new Error('All retries exhausted');

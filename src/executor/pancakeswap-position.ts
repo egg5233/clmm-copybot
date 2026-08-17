@@ -1,4 +1,10 @@
-import { AccountInfo, ComputeBudgetProgram, Connection, PublicKey, TransactionInstruction } from '@solana/web3.js';
+import {
+  AccountInfo,
+  ComputeBudgetProgram,
+  Connection,
+  PublicKey,
+  TransactionInstruction,
+} from '@solana/web3.js';
 import { NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import BN from 'bn.js';
 import { Chain, makeTransaction, IGetPositionInfoByNftMintReturn } from 'byreal-clmm-sdk-alpha';
@@ -10,9 +16,20 @@ import { jupiterFetch } from '../utils/jupiter-api';
 import { swapForToken, getActualSwapOutput, lastSwapError } from './jupiter-swap';
 import { PositionMap } from '../state/position-map';
 import { OperationQueue } from './queue';
-import { notifyOpenFailed, notifyCloseFailed, notifySolInsufficient, notifySwapFailed, notifyPumpApproval } from '../discord/notify';
+import {
+  notifyOpenFailed,
+  notifyCloseFailed,
+  notifySolInsufficient,
+  notifySwapFailed,
+  notifyPumpApproval,
+} from '../discord/notify';
 import { checkTokenLiquidity } from '../monitor/pool-tvl';
-import { isPumpPending, isPumpApproved, isPumpRejected, addPumpPending } from '../state/pump-pending';
+import {
+  isPumpPending,
+  isPumpApproved,
+  isPumpRejected,
+  addPumpPending,
+} from '../state/pump-pending';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -45,7 +62,15 @@ function patchSdkForPcs(): void {
     baseModule.getAmmV3Program = (programId: any) => {
       if (programId.toBase58() === PCS_ID) {
         // Use Byreal IDL (identical instruction set) but with PCS program address
-        const idlPath = path.join(sdkDir, 'dist', 'cjs', 'instructions', 'target', 'idl', 'byreal_amm_v3.json');
+        const idlPath = path.join(
+          sdkDir,
+          'dist',
+          'cjs',
+          'instructions',
+          'target',
+          'idl',
+          'byreal_amm_v3.json',
+        );
         const idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8'));
         const pcsIdl = { ...idl, address: PCS_ID };
         const anchor = require('@coral-xyz/anchor');
@@ -71,7 +96,10 @@ function patchSdkForPcs(): void {
  */
 function patchConnectionChunking(conn: Connection): void {
   const original = conn.getMultipleAccountsInfo.bind(conn);
-  conn.getMultipleAccountsInfo = async (keys: PublicKey[], ...args: any[]): Promise<(AccountInfo<Buffer> | null)[]> => {
+  conn.getMultipleAccountsInfo = async (
+    keys: PublicKey[],
+    ...args: any[]
+  ): Promise<(AccountInfo<Buffer> | null)[]> => {
     if (keys.length <= 100) return original(keys, ...args);
     const results: (AccountInfo<Buffer> | null)[] = [];
     for (let i = 0; i < keys.length; i += 100) {
@@ -116,12 +144,20 @@ export class PcsPositionExecutor {
     this.positionMap = positionMap;
 
     // Fetch initial SOL balance
-    this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+    this.getSolBalance()
+      .then((b) => {
+        this.cachedSolBalance = b;
+      })
+      .catch(() => {});
   }
 
-  get isBusy(): boolean { return this.busy; }
+  get isBusy(): boolean {
+    return this.busy;
+  }
 
-  private stripSdkComputeUnitPriceInstructions(instructions: TransactionInstruction[]): TransactionInstruction[] {
+  private stripSdkComputeUnitPriceInstructions(
+    instructions: TransactionInstruction[],
+  ): TransactionInstruction[] {
     return instructions.filter((ix) => {
       if (!ix.programId.equals(ComputeBudgetProgram.programId)) return true;
       const data = Buffer.from(ix.data);
@@ -129,7 +165,10 @@ export class PcsPositionExecutor {
     });
   }
 
-  private async makeSdkTransactionWithMinimumPriorityFee(result: { instructions: TransactionInstruction[]; signers?: any[] }): Promise<any> {
+  private async makeSdkTransactionWithMinimumPriorityFee(result: {
+    instructions: TransactionInstruction[];
+    signers?: any[];
+  }): Promise<any> {
     return makeTransaction({
       connection: this.connection,
       payerPublicKey: getUserAddress(),
@@ -148,7 +187,9 @@ export class PcsPositionExecutor {
     return true;
   }
 
-  private release(): void { this.busy = false; }
+  private release(): void {
+    this.busy = false;
+  }
 
   // ===== Token checks =====
 
@@ -174,7 +215,9 @@ export class PcsPositionExecutor {
   async getSolBalance(): Promise<number> {
     try {
       return (await this.readConnection.getBalance(getUserAddress())) / 1e9;
-    } catch { return 0; }
+    } catch {
+      return 0;
+    }
   }
 
   private async getTokenBalance(owner: PublicKey, mint: PublicKey): Promise<BN> {
@@ -189,7 +232,10 @@ export class PcsPositionExecutor {
       // Try TOKEN_PROGRAM_ID first, then TOKEN_2022_PROGRAM_ID
       for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
         try {
-          const accounts = await this.readConnection.getTokenAccountsByOwner(owner, { mint, programId });
+          const accounts = await this.readConnection.getTokenAccountsByOwner(owner, {
+            mint,
+            programId,
+          });
           if (accounts.value.length > 0) {
             let total = new BN(0);
             for (const acc of accounts.value) {
@@ -199,23 +245,31 @@ export class PcsPositionExecutor {
             }
             return total;
           }
-        } catch { /* try next */ }
+        } catch {
+          /* try next */
+        }
       }
       return new BN(0);
-    } catch { return new BN(0); }
+    } catch {
+      return new BN(0);
+    }
   }
 
   /**
    * Read target's position info with retry (RPC lag after open can cause null reads).
    */
-  private async retryGetPosition(nftMint: PublicKey): Promise<IGetPositionInfoByNftMintReturn | null> {
+  private async retryGetPosition(
+    nftMint: PublicKey,
+  ): Promise<IGetPositionInfoByNftMintReturn | null> {
     for (let i = 0; i < 5; i++) {
       try {
         const info = await this.chain.getPositionInfoByNftMint(nftMint);
         if (info) return info;
-      } catch { /* retry */ }
+      } catch {
+        /* retry */
+      }
       const delay = i === 0 ? 2000 : 3000 * i;
-      await new Promise(r => setTimeout(r, delay));
+      await new Promise((r) => setTimeout(r, delay));
     }
     return null;
   }
@@ -223,7 +277,11 @@ export class PcsPositionExecutor {
   /**
    * Retry a function on transient errors (blockhash expired, RPC timeout, etc.)
    */
-  private async retryOnTransient<T>(fn: () => Promise<T>, label: string, maxRetries = 3): Promise<T> {
+  private async retryOnTransient<T>(
+    fn: () => Promise<T>,
+    label: string,
+    maxRetries = 3,
+  ): Promise<T> {
     for (let i = 0; i < maxRetries; i++) {
       try {
         return await fn();
@@ -236,8 +294,11 @@ export class PcsPositionExecutor {
           /ECONNRESET/i.test(msg) ||
           /fetch failed/i.test(msg);
         if (isTransient && i < maxRetries - 1) {
-          logger.warn(MODULE, `${label}: transient error (${msg.slice(0, 80)}), retry ${i + 1}/${maxRetries}...`);
-          await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+          logger.warn(
+            MODULE,
+            `${label}: transient error (${msg.slice(0, 80)}), retry ${i + 1}/${maxRetries}...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
           continue;
         }
         throw err;
@@ -253,7 +314,9 @@ export class PcsPositionExecutor {
 
   private isTransientError(err: any): boolean {
     const msg = err?.message || '';
-    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(msg);
+    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(
+      msg,
+    );
   }
 
   /**
@@ -262,13 +325,18 @@ export class PcsPositionExecutor {
   private async verifyTxSuccess(txSig: string): Promise<boolean> {
     try {
       const latestBlockhash = await this.connection.getLatestBlockhash();
-      await this.connection.confirmTransaction({ signature: txSig, ...latestBlockhash }, 'confirmed');
+      await this.connection.confirmTransaction(
+        { signature: txSig, ...latestBlockhash },
+        'confirmed',
+      );
       const tx = await this.readConnection.getParsedTransaction(txSig, {
         maxSupportedTransactionVersion: 0,
         commitment: 'confirmed',
       });
       return tx !== null && !tx.meta?.err;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -296,7 +364,9 @@ export class PcsPositionExecutor {
         }
       }
       return totalLamports > 0 ? totalLamports / 1e9 : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   // ===== Core Operations =====
@@ -349,8 +419,11 @@ export class PcsPositionExecutor {
       }
 
       if (config.pumpFilterMode !== 'off') {
-        const pumpMint = mintAStr.toLowerCase().includes('pump') ? mintAStr
-          : mintBStr.toLowerCase().includes('pump') ? mintBStr : null;
+        const pumpMint = mintAStr.toLowerCase().includes('pump')
+          ? mintAStr
+          : mintBStr.toLowerCase().includes('pump')
+            ? mintBStr
+            : null;
         if (pumpMint && !isPumpApproved(pumpMint)) {
           if (config.pumpFilterMode === 'full') {
             this.lastSkipReason = 'Pump 代幣過濾';
@@ -361,7 +434,13 @@ export class PcsPositionExecutor {
             return null;
           }
           if (!isPumpPending(pumpMint)) {
-            addPumpPending({ mint: pumpMint, symbol: '', pool: poolLabel, targetWallet: targetWallet || '', detectedAt: Date.now() });
+            addPumpPending({
+              mint: pumpMint,
+              symbol: '',
+              pool: poolLabel,
+              targetWallet: targetWallet || '',
+              detectedAt: Date.now(),
+            });
             notifyPumpApproval(pumpMint, '', poolLabel).catch(() => {});
           }
           this.lastSkipReason = 'Pump 代幣等待確認';
@@ -370,7 +449,10 @@ export class PcsPositionExecutor {
       }
 
       if (config.minPoolTvl > 0) {
-        for (const [mint, label] of [[mintAStr, 'mintA'], [mintBStr, 'mintB']] as [string, string][]) {
+        for (const [mint, label] of [
+          [mintAStr, 'mintA'],
+          [mintBStr, 'mintB'],
+        ] as [string, string][]) {
           if (config.poolTvlWhitelist.has(mint)) continue;
           if (STABLE_MINTS.has(mint)) continue;
           const tvl = await checkTokenLiquidity(mint);
@@ -392,7 +474,10 @@ export class PcsPositionExecutor {
       // 3. Calculate scaled amounts
       const targetA = scaleAmount(positionInfo.tokenA.amount, targetWallet);
       const targetB = scaleAmount(positionInfo.tokenB.amount, targetWallet);
-      logger.info(MODULE, `Target deposited: A=${positionInfo.tokenA.uiAmount}, B=${positionInfo.tokenB.uiAmount}`);
+      logger.info(
+        MODULE,
+        `Target deposited: A=${positionInfo.tokenA.uiAmount}, B=${positionInfo.tokenB.uiAmount}`,
+      );
 
       // 4. Check balances + swap if needed
       let ourBalanceA = await this.getTokenBalance(userAddress, mintA);
@@ -403,18 +488,29 @@ export class PcsPositionExecutor {
         const deficit = targetA.sub(ourBalanceA);
         let txSig: string | null = null;
         if (mintA.equals(NATIVE_MINT)) {
-          if (mintAStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
+          if (mintAStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
         } else {
-          if (!ourBalanceB.isZero()) txSig = await swapForToken(this.connection, mintBStr, mintAStr, deficit.toString());
-          if (!txSig && mintAStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
+          if (!ourBalanceB.isZero())
+            txSig = await swapForToken(this.connection, mintBStr, mintAStr, deficit.toString());
+          if (!txSig && mintAStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
         }
         if (!txSig) {
           notifySwapFailed(mintAStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const addedA = await getActualSwapOutput(this.readConnection, txSig, mintAStr, userAddress.toBase58());
+        const addedA = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintAStr,
+          userAddress.toBase58(),
+        );
         if (addedA) ourBalanceA = ourBalanceA.add(new BN(addedA));
-        else { await new Promise(r => setTimeout(r, 5000)); ourBalanceA = await this.getTokenBalance(userAddress, mintA); }
+        else {
+          await new Promise((r) => setTimeout(r, 5000));
+          ourBalanceA = await this.getTokenBalance(userAddress, mintA);
+        }
       }
 
       // Swap for tokenB
@@ -422,18 +518,29 @@ export class PcsPositionExecutor {
         const deficit = targetB.sub(ourBalanceB);
         let txSig: string | null = null;
         if (mintB.equals(NATIVE_MINT)) {
-          if (mintBStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
+          if (mintBStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
         } else {
-          if (mintBStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
-          if (!txSig && !ourBalanceA.isZero()) txSig = await swapForToken(this.connection, mintAStr, mintBStr, deficit.toString());
+          if (mintBStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
+          if (!txSig && !ourBalanceA.isZero())
+            txSig = await swapForToken(this.connection, mintAStr, mintBStr, deficit.toString());
         }
         if (!txSig) {
           notifySwapFailed(mintBStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const addedB = await getActualSwapOutput(this.readConnection, txSig, mintBStr, userAddress.toBase58());
+        const addedB = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintBStr,
+          userAddress.toBase58(),
+        );
         if (addedB) ourBalanceB = ourBalanceB.add(new BN(addedB));
-        else { await new Promise(r => setTimeout(r, 5000)); ourBalanceB = await this.getTokenBalance(userAddress, mintB); }
+        else {
+          await new Promise((r) => setTimeout(r, 5000));
+          ourBalanceB = await this.getTokenBalance(userAddress, mintB);
+        }
       }
 
       if (ourBalanceA.isZero() && ourBalanceB.isZero()) {
@@ -445,7 +552,7 @@ export class PcsPositionExecutor {
       const MAX_OPEN_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_OPEN_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
           ourBalanceA = await this.getTokenBalance(userAddress, mintA);
           ourBalanceB = await this.getTokenBalance(userAddress, mintB);
         }
@@ -465,36 +572,46 @@ export class PcsPositionExecutor {
         }
 
         try {
-          const { instructions, signers, nftAddress } = await this.chain.createPositionInstructions({
-            userAddress,
-            poolInfo: rawPoolInfo,
-            tickLower,
-            tickUpper,
-            base,
-            baseAmount,
-            otherAmountMax,
-          });
-
-          const txSig = await this.retryOnTransient(
-            async () => {
-              const tx = await makeTransaction({
-                connection: this.connection,
-                payerPublicKey: userAddress,
-                instructions,
-                signers,
-                options: { computeUnitPrice: MIN_SDK_PRIORITY_FEE_MICROLAMPORTS },
-              });
-              const signed = await signerCallback(tx);
-              return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+          const { instructions, signers, nftAddress } = await this.chain.createPositionInstructions(
+            {
+              userAddress,
+              poolInfo: rawPoolInfo,
+              tickLower,
+              tickUpper,
+              base,
+              baseAmount,
+              otherAmountMax,
             },
-            'buildSignSend',
           );
+
+          const txSig = await this.retryOnTransient(async () => {
+            const tx = await makeTransaction({
+              connection: this.connection,
+              payerPublicKey: userAddress,
+              instructions,
+              signers,
+              options: { computeUnitPrice: MIN_SDK_PRIORITY_FEE_MICROLAMPORTS },
+            });
+            const signed = await signerCallback(tx);
+            return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+          }, 'buildSignSend');
 
           // Save mapping immediately
           if (nftAddress) {
-            this.positionMap.set(targetNftMint, nftAddress, poolLabel, targetWallet, tickLower, tickUpper, 'pancakeswap');
+            this.positionMap.set(
+              targetNftMint,
+              nftAddress,
+              poolLabel,
+              targetWallet,
+              tickLower,
+              tickUpper,
+              'pancakeswap',
+            );
             this.positionMap.setLockedSol(targetNftMint, this.rentPerPosition);
-            this.positionMap.setTargetLiquidity(targetNftMint, positionInfo.rawPositionInfo.liquidity.toString());
+            this.positionMap.setTargetLiquidity(
+              targetNftMint,
+              positionInfo.rawPositionInfo.liquidity.toString(),
+            );
             this.poolIdToMints.set(poolId, poolLabel);
           }
 
@@ -502,12 +619,16 @@ export class PcsPositionExecutor {
           try {
             const bh = await this.connection.getLatestBlockhash();
             await this.connection.confirmTransaction({ signature: txSig, ...bh }, 'confirmed');
-          } catch { /* mapping already saved */ }
+          } catch {
+            /* mapping already saved */
+          }
 
           // Extract actual locked SOL (non-blocking)
-          this.extractLockedSolFromTx(txSig).then(actual => {
-            if (actual !== null) this.positionMap.setLockedSol(targetNftMint, actual);
-          }).catch(() => {});
+          this.extractLockedSolFromTx(txSig)
+            .then((actual) => {
+              if (actual !== null) this.positionMap.setLockedSol(targetNftMint, actual);
+            })
+            .catch(() => {});
 
           return txSig;
         } catch (openErr: any) {
@@ -527,11 +648,18 @@ export class PcsPositionExecutor {
       return null;
     } finally {
       this.release();
-      this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+      this.getSolBalance()
+        .then((b) => {
+          this.cachedSolBalance = b;
+        })
+        .catch(() => {});
     }
   }
 
-  async copyIncreaseLiquidity(targetNftMint: string, targetWallet?: string): Promise<string | null> {
+  async copyIncreaseLiquidity(
+    targetNftMint: string,
+    targetWallet?: string,
+  ): Promise<string | null> {
     const myNftMint = this.positionMap.get(targetNftMint);
     if (!myNftMint) return null;
 
@@ -540,7 +668,7 @@ export class PcsPositionExecutor {
 
     try {
       // Wait + retry to handle RPC lag after target's increase TX
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
 
       const targetPosition = await this.retryGetPosition(new PublicKey(targetNftMint));
       if (!targetPosition) {
@@ -572,7 +700,10 @@ export class PcsPositionExecutor {
         return null;
       }
 
-      logger.info(MODULE, `Increase delta: A=${targetA.toString()}, B=${targetB.toString()} (full target: A=${fullTargetA.toString()}, B=${fullTargetB.toString()}, our pos: A=${myAmountA.toString()}, B=${myAmountB.toString()})`);
+      logger.info(
+        MODULE,
+        `Increase delta: A=${targetA.toString()}, B=${targetB.toString()} (full target: A=${fullTargetA.toString()}, B=${fullTargetB.toString()}, our pos: A=${myAmountA.toString()}, B=${myAmountB.toString()})`,
+      );
 
       let ourBalanceA = await this.getTokenBalance(userAddress, mintA);
       let ourBalanceB = await this.getTokenBalance(userAddress, mintB);
@@ -582,15 +713,26 @@ export class PcsPositionExecutor {
         const deficit = targetA.sub(ourBalanceA);
         let txSig: string | null = null;
         if (mintA.equals(NATIVE_MINT)) {
-          if (mintAStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
+          if (mintAStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
         } else {
-          if (!ourBalanceB.isZero()) txSig = await swapForToken(this.connection, mintBStr, mintAStr, deficit.toString());
-          if (!txSig && mintAStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
+          if (!ourBalanceB.isZero())
+            txSig = await swapForToken(this.connection, mintBStr, mintAStr, deficit.toString());
+          if (!txSig && mintAStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
         }
         if (txSig) {
-          const added = await getActualSwapOutput(this.readConnection, txSig, mintAStr, userAddress.toBase58());
+          const added = await getActualSwapOutput(
+            this.readConnection,
+            txSig,
+            mintAStr,
+            userAddress.toBase58(),
+          );
           if (added) ourBalanceA = ourBalanceA.add(new BN(added));
-          else { await new Promise(r => setTimeout(r, 5000)); ourBalanceA = await this.getTokenBalance(userAddress, mintA); }
+          else {
+            await new Promise((r) => setTimeout(r, 5000));
+            ourBalanceA = await this.getTokenBalance(userAddress, mintA);
+          }
         }
       }
 
@@ -599,15 +741,26 @@ export class PcsPositionExecutor {
         const deficit = targetB.sub(ourBalanceB);
         let txSig: string | null = null;
         if (mintB.equals(NATIVE_MINT)) {
-          if (mintBStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
+          if (mintBStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
         } else {
-          if (mintBStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
-          if (!txSig && !ourBalanceA.isZero()) txSig = await swapForToken(this.connection, mintAStr, mintBStr, deficit.toString());
+          if (mintBStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
+          if (!txSig && !ourBalanceA.isZero())
+            txSig = await swapForToken(this.connection, mintAStr, mintBStr, deficit.toString());
         }
         if (txSig) {
-          const added = await getActualSwapOutput(this.readConnection, txSig, mintBStr, userAddress.toBase58());
+          const added = await getActualSwapOutput(
+            this.readConnection,
+            txSig,
+            mintBStr,
+            userAddress.toBase58(),
+          );
           if (added) ourBalanceB = ourBalanceB.add(new BN(added));
-          else { await new Promise(r => setTimeout(r, 5000)); ourBalanceB = await this.getTokenBalance(userAddress, mintB); }
+          else {
+            await new Promise((r) => setTimeout(r, 5000));
+            ourBalanceB = await this.getTokenBalance(userAddress, mintB);
+          }
         }
       }
 
@@ -616,7 +769,7 @@ export class PcsPositionExecutor {
       const MAX_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
           ourBalanceA = await this.getTokenBalance(userAddress, mintA);
           ourBalanceB = await this.getTokenBalance(userAddress, mintB);
         }
@@ -647,7 +800,9 @@ export class PcsPositionExecutor {
                 computeBudgetOptions: { computeUnitPrice: MIN_SDK_PRIORITY_FEE_MICROLAMPORTS },
               });
               const signed = await signerCallback(result.transaction);
-              return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+              return this.connection.sendTransaction(signed, {
+                skipPreflight: config.skipPreflight,
+              });
             },
             `addLiquidity(${myNftMint.slice(0, 8)})`,
           );
@@ -657,9 +812,14 @@ export class PcsPositionExecutor {
           try {
             const updatedTarget = await this.retryGetPosition(new PublicKey(targetNftMint));
             if (updatedTarget) {
-              this.positionMap.setTargetLiquidity(targetNftMint, updatedTarget.rawPositionInfo.liquidity.toString());
+              this.positionMap.setTargetLiquidity(
+                targetNftMint,
+                updatedTarget.rawPositionInfo.liquidity.toString(),
+              );
             }
-          } catch { /* non-critical */ }
+          } catch {
+            /* non-critical */
+          }
 
           return txSig;
         } catch (err: any) {
@@ -676,7 +836,9 @@ export class PcsPositionExecutor {
     }
   }
 
-  async copyDecreaseLiquidity(targetNftMint: string): Promise<{ txSig: string; type: 'DECREASE' | 'COLLECT_FEE' } | null> {
+  async copyDecreaseLiquidity(
+    targetNftMint: string,
+  ): Promise<{ txSig: string; type: 'DECREASE' | 'COLLECT_FEE' } | null> {
     const myNftMint = this.positionMap.get(targetNftMint);
     if (!myNftMint) return null;
 
@@ -702,7 +864,10 @@ export class PcsPositionExecutor {
           const removedLiq = storedLiq.sub(targetCurrentLiq);
           const pctNumerator = removedLiq.mul(new BN(10000));
           const pctBps = pctNumerator.div(storedLiq).toNumber(); // basis points removed
-          logger.info(MODULE, `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`);
+          logger.info(
+            MODULE,
+            `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`,
+          );
 
           try {
             const myPos = await this.retryGetPosition(new PublicKey(myNftMint));
@@ -712,9 +877,15 @@ export class PcsPositionExecutor {
               const calcAmount = myLiq.mul(removedLiq).div(storedLiq);
               decreaseAmount = calcAmount;
               if (calcAmount.isZero()) {
-                logger.info(MODULE, `Proportional decrease rounds to zero, collecting fees instead`);
+                logger.info(
+                  MODULE,
+                  `Proportional decrease rounds to zero, collecting fees instead`,
+                );
               } else {
-                logger.info(MODULE, `Our decrease: ${calcAmount.toString()} of ${myLiq.toString()}`);
+                logger.info(
+                  MODULE,
+                  `Our decrease: ${calcAmount.toString()} of ${myLiq.toString()}`,
+                );
               }
             }
           } catch (err: any) {
@@ -725,12 +896,18 @@ export class PcsPositionExecutor {
           this.positionMap.setTargetLiquidity(targetNftMint, targetCurrentLiq.toString());
         } else {
           // Target liquidity >= stored — likely fee collection only (increase happened?)
-          logger.info(MODULE, `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`);
+          logger.info(
+            MODULE,
+            `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`,
+          );
           decreaseAmount = new BN(0);
         }
       } else {
         // No stored liquidity (legacy position) — can't calculate proportion, collect fees
-        logger.info(MODULE, `No stored targetLiquidity for ${targetNftMint.slice(0, 8)}, collecting fees (legacy position)`);
+        logger.info(
+          MODULE,
+          `No stored targetLiquidity for ${targetNftMint.slice(0, 8)}, collecting fees (legacy position)`,
+        );
         decreaseAmount = new BN(0);
       }
     }
@@ -766,7 +943,10 @@ export class PcsPositionExecutor {
 
     // Decrease liquidity (full or proportional)
     const isPartial = decreaseAmount !== null;
-    logger.info(MODULE, `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myNftMint.slice(0, 8)}...`);
+    logger.info(
+      MODULE,
+      `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myNftMint.slice(0, 8)}...`,
+    );
 
     if (config.dryRun) return { txSig: 'dry-run-pcs-decrease', type: 'DECREASE' };
     if (!this.acquire('copyDecreaseLiquidity')) return null;
@@ -775,8 +955,11 @@ export class PcsPositionExecutor {
       const MAX_DECREASE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_DECREASE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Retrying decrease (attempt ${attempt + 1}/${MAX_DECREASE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying decrease (attempt ${attempt + 1}/${MAX_DECREASE_ATTEMPTS})...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -798,7 +981,9 @@ export class PcsPositionExecutor {
                 });
                 const feeTx = await this.makeSdkTransactionWithMinimumPriorityFee(feeResult);
                 const feeSigned = await signerCallback(feeTx);
-                const feeTxSig = await this.connection.sendTransaction(feeSigned, { skipPreflight: config.skipPreflight });
+                const feeTxSig = await this.connection.sendTransaction(feeSigned, {
+                  skipPreflight: config.skipPreflight,
+                });
                 logger.info(MODULE, `Fees collected: ${feeTxSig}`);
                 return { txSig: feeTxSig, type: 'COLLECT_FEE' };
               } catch (feeErr: any) {
@@ -816,7 +1001,9 @@ export class PcsPositionExecutor {
                 });
                 const tx = await this.makeSdkTransactionWithMinimumPriorityFee(result);
                 const signed = await signerCallback(tx);
-                return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+                return this.connection.sendTransaction(signed, {
+                  skipPreflight: config.skipPreflight,
+                });
               },
               `pcsPartialDecrease(${myNftMint.slice(0, 8)})`,
             );
@@ -844,11 +1031,16 @@ export class PcsPositionExecutor {
                   const preAmt = preMap.get(b.mint) || 0n;
                   if (postAmt > preAmt) {
                     const diff = (postAmt - preAmt).toString();
-                    logger.info(MODULE, `Received from partial decrease: ${b.mint.slice(0, 8)} = ${diff}`);
+                    logger.info(
+                      MODULE,
+                      `Received from partial decrease: ${b.mint.slice(0, 8)} = ${diff}`,
+                    );
                   }
                 }
               }
-            } catch { /* non-critical */ }
+            } catch {
+              /* non-critical */
+            }
 
             return { txSig, type: 'DECREASE' };
           } else {
@@ -862,7 +1054,9 @@ export class PcsPositionExecutor {
                 });
                 const tx = await this.makeSdkTransactionWithMinimumPriorityFee(result);
                 const signed = await signerCallback(tx);
-                return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+                return this.connection.sendTransaction(signed, {
+                  skipPreflight: config.skipPreflight,
+                });
               },
               `decreaseLiquidity(${myNftMint.slice(0, 8)})`,
             );
@@ -870,8 +1064,14 @@ export class PcsPositionExecutor {
             return { txSig, type: 'DECREASE' };
           }
         } catch (decErr: any) {
-          if (attempt < MAX_DECREASE_ATTEMPTS - 1 && (this.isRetryableSimError(decErr) || this.isTransientError(decErr))) {
-            logger.warn(MODULE, `Decrease attempt ${attempt + 1} failed (${(decErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_DECREASE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(decErr) || this.isTransientError(decErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Decrease attempt ${attempt + 1} failed (${(decErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw decErr;
@@ -899,7 +1099,7 @@ export class PcsPositionExecutor {
       const MAX_CLOSE_ATTEMPTS = 3;
 
       for (let attempt = 0; attempt < MAX_CLOSE_ATTEMPTS; attempt++) {
-        if (attempt > 0) await new Promise(r => setTimeout(r, 2000));
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
 
         try {
           txSig = await this.retryOnTransient(
@@ -911,12 +1111,18 @@ export class PcsPositionExecutor {
               });
               const tx = await this.makeSdkTransactionWithMinimumPriorityFee(result);
               const signed = await signerCallback(tx);
-              return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+              return this.connection.sendTransaction(signed, {
+                skipPreflight: config.skipPreflight,
+              });
             },
             `closePosition(${myNftMint.slice(0, 8)})`,
           );
         } catch (err: any) {
-          if (attempt < MAX_CLOSE_ATTEMPTS - 1 && (this.isRetryableSimError(err) || this.isTransientError(err))) continue;
+          if (
+            attempt < MAX_CLOSE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(err) || this.isTransientError(err))
+          )
+            continue;
           throw err;
         }
 
@@ -966,11 +1172,16 @@ export class PcsPositionExecutor {
             }
           }
         }
-      } catch { /* non-critical */ }
+      } catch {
+        /* non-critical */
+      }
 
       return txSig;
     } catch (err: any) {
-      logger.error(MODULE, `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`);
+      logger.error(
+        MODULE,
+        `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`,
+      );
       notifyCloseFailed(myNftMint, err, 0);
       return null;
     } finally {
@@ -1048,7 +1259,9 @@ export class PcsPositionExecutor {
     try {
       const info = await this.chain.getPositionInfoByNftMint(new PublicKey(nftMint));
       return info !== null;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -1064,11 +1277,16 @@ export class PcsPositionExecutor {
       try {
         const targetPos = await this.chain.getPositionInfoByNftMint(new PublicKey(targetNft));
         if (!targetPos) {
-          logger.info(MODULE, `Reconcile: target ${targetNft.slice(0, 8)} no longer exists, orphan detected`);
+          logger.info(
+            MODULE,
+            `Reconcile: target ${targetNft.slice(0, 8)} no longer exists, orphan detected`,
+          );
           orphans.push(targetNft);
         }
-      } catch { /* skip on RPC error */ }
-      await new Promise(r => setTimeout(r, 500));
+      } catch {
+        /* skip on RPC error */
+      }
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     if (orphans.length === 0) return;
@@ -1119,7 +1337,9 @@ export class PcsPositionExecutor {
             if (data.data?.[mint]?.price) prices[mint] = parseFloat(data.data[mint].price);
           }
         }
-      } catch { /* use empty prices */ }
+      } catch {
+        /* use empty prices */
+      }
     }
 
     for (const [_targetNft, entry] of pcsEntries) {
@@ -1130,8 +1350,14 @@ export class PcsPositionExecutor {
 
         const amtA = parseFloat(info.tokenA.uiAmount.toString());
         const amtB = parseFloat(info.tokenB.uiAmount.toString());
-        const feeA = info.tokenA.feeAmount ? parseFloat(info.tokenA.feeAmount.toString()) / Math.pow(10, info.rawPoolInfo.mintDecimalsA) : 0;
-        const feeB = info.tokenB.feeAmount ? parseFloat(info.tokenB.feeAmount.toString()) / Math.pow(10, info.rawPoolInfo.mintDecimalsB) : 0;
+        const feeA = info.tokenA.feeAmount
+          ? parseFloat(info.tokenA.feeAmount.toString()) /
+            Math.pow(10, info.rawPoolInfo.mintDecimalsA)
+          : 0;
+        const feeB = info.tokenB.feeAmount
+          ? parseFloat(info.tokenB.feeAmount.toString()) /
+            Math.pow(10, info.rawPoolInfo.mintDecimalsB)
+          : 0;
 
         const mintAStr = info.rawPoolInfo.mintA.toBase58();
         const mintBStr = info.rawPoolInfo.mintB.toBase58();
@@ -1141,8 +1367,10 @@ export class PcsPositionExecutor {
         lpUsd += amtA * priceA + amtB * priceB;
         feeUsd += feeA * priceA + feeB * priceB;
         count++;
-      } catch { /* skip failed position */ }
-      await new Promise(r => setTimeout(r, 200));
+      } catch {
+        /* skip failed position */
+      }
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     return { lpUsd, feeUsd, count };
@@ -1151,12 +1379,28 @@ export class PcsPositionExecutor {
   /**
    * Get position assets for dashboard asset-breakdown.
    */
-  async getPositionAssets(): Promise<Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>> {
+  async getPositionAssets(): Promise<
+    Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+    }>
+  > {
     const entries = this.positionMap.toJSON();
     const pcsEntries = Object.entries(entries).filter(([, e]) => (e as any).dex === 'pancakeswap');
     if (pcsEntries.length === 0) return [];
 
-    const mintTotals = new Map<string, { balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>();
+    const mintTotals = new Map<
+      string,
+      {
+        balance: number;
+        decimals: number;
+        pairedStable: Record<string, number>;
+        liquidityUsd: number;
+      }
+    >();
 
     for (const [, entry] of pcsEntries) {
       try {
@@ -1171,19 +1415,33 @@ export class PcsPositionExecutor {
         const decB = info.rawPoolInfo.mintDecimalsB;
 
         // Aggregate per-mint
-        const addToMint = (mint: string, amount: number, decimals: number, pairedMint: string, pairedAmount: number) => {
-          const existing = mintTotals.get(mint) || { balance: 0, decimals, pairedStable: {}, liquidityUsd: 0 };
+        const addToMint = (
+          mint: string,
+          amount: number,
+          decimals: number,
+          pairedMint: string,
+          pairedAmount: number,
+        ) => {
+          const existing = mintTotals.get(mint) || {
+            balance: 0,
+            decimals,
+            pairedStable: {},
+            liquidityUsd: 0,
+          };
           existing.balance += amount;
           if (STABLE_MINTS.has(pairedMint)) {
-            existing.pairedStable[pairedMint] = (existing.pairedStable[pairedMint] || 0) + pairedAmount;
+            existing.pairedStable[pairedMint] =
+              (existing.pairedStable[pairedMint] || 0) + pairedAmount;
           }
           mintTotals.set(mint, existing);
         };
 
         addToMint(mintAStr, amtA, decA, mintBStr, amtB);
         addToMint(mintBStr, amtB, decB, mintAStr, amtA);
-      } catch { /* skip */ }
-      await new Promise(r => setTimeout(r, 200));
+      } catch {
+        /* skip */
+      }
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     return Array.from(mintTotals.entries()).map(([mint, data]) => ({

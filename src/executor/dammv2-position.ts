@@ -1,16 +1,42 @@
 import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync, NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
+import {
+  getAssociatedTokenAddressSync,
+  NATIVE_MINT,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+} from '@solana/spl-token';
 import BN from 'bn.js';
-import { CpAmm, derivePositionAddress, derivePositionNftAccount, getTokenProgram } from '@meteora-ag/cp-amm-sdk';
+import {
+  CpAmm,
+  derivePositionAddress,
+  derivePositionNftAccount,
+  getTokenProgram,
+} from '@meteora-ag/cp-amm-sdk';
 import type { PoolState, PositionState } from '@meteora-ag/cp-amm-sdk';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { getUserAddress, signLegacy, signLegacyWithExtra } from '../utils/wallet';
 import { scaleAmount, getAmountRatio } from '../utils/ratio';
 import { PositionMap } from '../state/position-map';
-import { notifyOpenFailed, notifyCloseFailed, notifySolInsufficient, notifyPumpApproval, notifySwapFailed } from '../discord/notify';
-import { isPumpPending, isPumpApproved, isPumpRejected, addPumpPending } from '../state/pump-pending';
-import { swapForToken, getActualSwapOutput, lastSwapError, invalidateHoldingsCache } from './jupiter-swap';
+import {
+  notifyOpenFailed,
+  notifyCloseFailed,
+  notifySolInsufficient,
+  notifyPumpApproval,
+  notifySwapFailed,
+} from '../discord/notify';
+import {
+  isPumpPending,
+  isPumpApproved,
+  isPumpRejected,
+  addPumpPending,
+} from '../state/pump-pending';
+import {
+  swapForToken,
+  getActualSwapOutput,
+  lastSwapError,
+  invalidateHoldingsCache,
+} from './jupiter-swap';
 import { OperationQueue } from './queue';
 import { checkTokenLiquidity } from '../monitor/pool-tvl';
 import * as fs from 'fs';
@@ -25,8 +51,8 @@ const PENDING_FILE = './data/pending-swaps.json';
 const DAMMV2_PROGRAM_ID = 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG';
 
 export class DammV2PositionExecutor {
-  private connection: Connection;       // Helius — TX execution
-  private readConnection: Connection;   // Alchemy — balance/position reads
+  private connection: Connection; // Helius — TX execution
+  private readConnection: Connection; // Alchemy — balance/position reads
   private positionMap: PositionMap;
   private busy = false;
 
@@ -36,7 +62,7 @@ export class DammV2PositionExecutor {
   public drawdownPausedAt: number | null = null;
   public lastSkipReason: string | null = null;
   public cachedSolBalance: number | null = null;
-  public rentPerPosition: number = 0.00890880; // fallback, queried from RPC
+  public rentPerPosition: number = 0.0089088; // fallback, queried from RPC
 
   constructor(connection: Connection, positionMap: PositionMap) {
     this.connection = connection;
@@ -45,11 +71,17 @@ export class DammV2PositionExecutor {
       : connection;
     this.positionMap = positionMap;
 
-    this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+    this.getSolBalance()
+      .then((b) => {
+        this.cachedSolBalance = b;
+      })
+      .catch(() => {});
     logger.info(MODULE, 'DammV2PositionExecutor initialized');
   }
 
-  get isBusy(): boolean { return this.busy; }
+  get isBusy(): boolean {
+    return this.busy;
+  }
 
   updateConnection(newConn: Connection): void {
     this.connection = newConn;
@@ -104,7 +136,9 @@ export class DammV2PositionExecutor {
 
   private isTransientError(err: any): boolean {
     const msg = err?.message || '';
-    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(msg);
+    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(
+      msg,
+    );
   }
 
   private isRetryableSimError(err: any): boolean {
@@ -117,7 +151,9 @@ export class DammV2PositionExecutor {
       const raw = fs.readFileSync('./data/token-names.json', 'utf-8');
       const cache = JSON.parse(raw);
       return cache[mint]?.symbol || mint;
-    } catch { return mint; }
+    } catch {
+      return mint;
+    }
   }
 
   private isTokenBlacklisted(mintA: string, mintB: string): boolean {
@@ -130,7 +166,7 @@ export class DammV2PositionExecutor {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) {
-          await new Promise(r => setTimeout(r, 3000 * attempt));
+          await new Promise((r) => setTimeout(r, 3000 * attempt));
         }
         const tx = await this.readConnection.getParsedTransaction(txSig, {
           maxSupportedTransactionVersion: 0,
@@ -138,14 +174,20 @@ export class DammV2PositionExecutor {
         });
         if (!tx?.meta) {
           if (attempt < 2) {
-            logger.debug(MODULE, `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`);
+            logger.debug(
+              MODULE,
+              `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`,
+            );
             continue;
           }
           logger.warn(MODULE, `verifyTxSuccess: TX not found after retries ${txSig.slice(0, 8)}`);
           return false;
         }
         if (tx.meta.err) {
-          logger.error(MODULE, `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`);
+          logger.error(
+            MODULE,
+            `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`,
+          );
           return false;
         }
         return true;
@@ -161,7 +203,10 @@ export class DammV2PositionExecutor {
     return false;
   }
 
-  private async parseTxTokenChanges(txSig: string, owner: PublicKey): Promise<{ mint: PublicKey; amount: BN }[]> {
+  private async parseTxTokenChanges(
+    txSig: string,
+    owner: PublicKey,
+  ): Promise<{ mint: PublicKey; amount: BN }[]> {
     try {
       const tx = await this.readConnection.getParsedTransaction(txSig, {
         maxSupportedTransactionVersion: 0,
@@ -201,7 +246,13 @@ export class DammV2PositionExecutor {
 
   private addPendingSwap(mint: PublicKey, amount: BN): void {
     const mintStr = mint.toBase58();
-    if (mintStr === USDC || mintStr === USDT_MINT || mintStr === USDT_T22 || mint.equals(NATIVE_MINT)) return;
+    if (
+      mintStr === USDC ||
+      mintStr === USDT_MINT ||
+      mintStr === USDT_T22 ||
+      mint.equals(NATIVE_MINT)
+    )
+      return;
     if (amount.lte(new BN(0))) return;
 
     const data = this.readPendingFile();
@@ -210,7 +261,10 @@ export class DammV2PositionExecutor {
     const total = existing.add(amount);
     data[mintStr] = { ...entry, pending: total.toString() };
     this.writePendingFile(data);
-    logger.info(MODULE, `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`);
+    logger.info(
+      MODULE,
+      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`,
+    );
   }
 
   private readPendingFile(): Record<string, any> {
@@ -256,13 +310,18 @@ export class DammV2PositionExecutor {
           maxRetries: 2,
         });
         const latestBlockhash = await this.connection.getLatestBlockhash();
-        await this.connection.confirmTransaction({
-          signature: sig,
-          ...latestBlockhash,
-        }, 'confirmed');
+        await this.connection.confirmTransaction(
+          {
+            signature: sig,
+            ...latestBlockhash,
+          },
+          'confirmed',
+        );
 
         // BUG FIX: v1.20.2 — verify meta.err after confirmTransaction
-        const txResult = await this.connection.getTransaction(sig, { maxSupportedTransactionVersion: 0 });
+        const txResult = await this.connection.getTransaction(sig, {
+          maxSupportedTransactionVersion: 0,
+        });
         if (txResult?.meta?.err) {
           throw new Error(`TX confirmed but failed on-chain: ${JSON.stringify(txResult.meta.err)}`);
         }
@@ -271,7 +330,7 @@ export class DammV2PositionExecutor {
       } catch (err: any) {
         if (i === config.maxRetry - 1) throw err;
         logger.warn(MODULE, `Send attempt ${i + 1} failed: ${err.message}, retrying...`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 2000));
       }
     }
 
@@ -301,12 +360,17 @@ export class DammV2PositionExecutor {
           maxRetries: 2,
         });
         const latestBlockhash = await this.connection.getLatestBlockhash();
-        await this.connection.confirmTransaction({
-          signature: sig,
-          ...latestBlockhash,
-        }, 'confirmed');
+        await this.connection.confirmTransaction(
+          {
+            signature: sig,
+            ...latestBlockhash,
+          },
+          'confirmed',
+        );
 
-        const txResult = await this.connection.getTransaction(sig, { maxSupportedTransactionVersion: 0 });
+        const txResult = await this.connection.getTransaction(sig, {
+          maxSupportedTransactionVersion: 0,
+        });
         if (txResult?.meta?.err) {
           throw new Error(`TX confirmed but failed on-chain: ${JSON.stringify(txResult.meta.err)}`);
         }
@@ -315,7 +379,7 @@ export class DammV2PositionExecutor {
       } catch (err: any) {
         if (i === config.maxRetry - 1) throw err;
         logger.warn(MODULE, `Send attempt ${i + 1} failed: ${err.message}, retrying...`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 2000));
       }
     }
 
@@ -351,7 +415,10 @@ export class DammV2PositionExecutor {
   /**
    * Get token program IDs from pool state flags.
    */
-  private getTokenPrograms(poolState: PoolState): { tokenAProgram: PublicKey; tokenBProgram: PublicKey } {
+  private getTokenPrograms(poolState: PoolState): {
+    tokenAProgram: PublicKey;
+    tokenBProgram: PublicKey;
+  } {
     return {
       tokenAProgram: getTokenProgram((poolState as any).tokenAFlag),
       tokenBProgram: getTokenProgram((poolState as any).tokenBFlag),
@@ -370,7 +437,10 @@ export class DammV2PositionExecutor {
       this.rentPerPosition = (rentPosition + rentMint + rentAta) / 1e9;
       logger.info(MODULE, `Rent per position: ${this.rentPerPosition} SOL`);
     } catch (err: any) {
-      logger.warn(MODULE, `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`);
+      logger.warn(
+        MODULE,
+        `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`,
+      );
     }
   }
 
@@ -383,7 +453,10 @@ export class DammV2PositionExecutor {
       }
     }
     if (missing.length === 0) return;
-    logger.info(MODULE, `Backfilling lockedSol for ${missing.length} DAMM v2 positions (${this.rentPerPosition} SOL each)`);
+    logger.info(
+      MODULE,
+      `Backfilling lockedSol for ${missing.length} DAMM v2 positions (${this.rentPerPosition} SOL each)`,
+    );
     for (const targetNft of missing) {
       this.positionMap.setLockedSol(targetNft, this.rentPerPosition);
     }
@@ -420,11 +493,20 @@ export class DammV2PositionExecutor {
 
     // === PHASE 0: Pre-checks ===
     if (this.positionMap.get(targetPositionNft)) {
-      logger.warn(MODULE, `Already have mapping for target position ${targetPositionNft.slice(0, 8)}, skipping`);
+      logger.warn(
+        MODULE,
+        `Already have mapping for target position ${targetPositionNft.slice(0, 8)}, skipping`,
+      );
       return null;
     }
-    if (this.solPaused) { this.lastSkipReason = 'SOL 不足暫停'; return null; }
-    if (this.drawdownPaused) { this.lastSkipReason = '回撤保護暫停'; return null; }
+    if (this.solPaused) {
+      this.lastSkipReason = 'SOL 不足暫停';
+      return null;
+    }
+    if (this.drawdownPaused) {
+      this.lastSkipReason = '回撤保護暫停';
+      return null;
+    }
     if (config.dammv2CloseOnlyWallets.has(targetWallet)) {
       this.lastSkipReason = 'Close-only 錢包';
       return null;
@@ -443,8 +525,11 @@ export class DammV2PositionExecutor {
 
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Target position not found yet, waiting ${(attempt + 1) * 2}s (attempt ${attempt + 1}/3)...`);
-          await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+          logger.info(
+            MODULE,
+            `Target position not found yet, waiting ${(attempt + 1) * 2}s (attempt ${attempt + 1}/3)...`,
+          );
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
         }
         try {
           poolState = await cpAmm.fetchPoolState(new PublicKey(poolAddress));
@@ -458,7 +543,10 @@ export class DammV2PositionExecutor {
       }
 
       if (!poolState || !targetPosState) {
-        logger.error(MODULE, `Cannot read pool/position after retries: ${targetPositionNft.slice(0, 8)}`);
+        logger.error(
+          MODULE,
+          `Cannot read pool/position after retries: ${targetPositionNft.slice(0, 8)}`,
+        );
         return null;
       }
 
@@ -467,7 +555,8 @@ export class DammV2PositionExecutor {
       const mintAStr = mintA.toBase58();
       const mintBStr = mintB.toBase58();
       const poolLabel = `${mintAStr}/${mintBStr}@${poolAddress}`;
-      const { tokenAProgram: _tokenAProgram, tokenBProgram: _tokenBProgram } = this.getTokenPrograms(poolState);
+      const { tokenAProgram: _tokenAProgram, tokenBProgram: _tokenBProgram } =
+        this.getTokenPrograms(poolState);
 
       // === PHASE 2: Filters ===
 
@@ -479,18 +568,30 @@ export class DammV2PositionExecutor {
 
       // 2b. Pump token filter
       if (config.pumpFilterMode !== 'off') {
-        const pumpMint = mintAStr.toLowerCase().includes('pump') ? mintAStr
-          : mintBStr.toLowerCase().includes('pump') ? mintBStr : null;
+        const pumpMint = mintAStr.toLowerCase().includes('pump')
+          ? mintAStr
+          : mintBStr.toLowerCase().includes('pump')
+            ? mintBStr
+            : null;
         if (pumpMint) {
           if (!isPumpApproved(pumpMint)) {
             if (config.pumpFilterMode === 'full') {
               this.lastSkipReason = 'Pump 代幣過濾';
               return null;
             }
-            if (isPumpRejected(pumpMint)) { this.lastSkipReason = 'Pump 代幣已拒絕'; return null; }
+            if (isPumpRejected(pumpMint)) {
+              this.lastSkipReason = 'Pump 代幣已拒絕';
+              return null;
+            }
             if (!isPumpPending(pumpMint)) {
               const symbol = this.getTokenSymbol(pumpMint);
-              addPumpPending({ mint: pumpMint, symbol, pool: poolLabel, targetWallet, detectedAt: Date.now() });
+              addPumpPending({
+                mint: pumpMint,
+                symbol,
+                pool: poolLabel,
+                targetWallet,
+                detectedAt: Date.now(),
+              });
               notifyPumpApproval(pumpMint, symbol, poolLabel).catch(() => {});
             }
             this.lastSkipReason = 'Pump 代幣等待確認';
@@ -502,12 +603,18 @@ export class DammV2PositionExecutor {
       // 2c. Pool TVL / liquidity filter
       if (config.minPoolTvl > 0) {
         const STABLES = new Set([USDC, USDT_MINT, USDT_T22]);
-        for (const [mint, label] of [[mintAStr, 'mintA'], [mintBStr, 'mintB']] as [string, string][]) {
+        for (const [mint, label] of [
+          [mintAStr, 'mintA'],
+          [mintBStr, 'mintB'],
+        ] as [string, string][]) {
           if (config.poolTvlWhitelist.has(mint)) continue;
           if (STABLES.has(mint) || mint === NATIVE_MINT.toBase58()) continue;
           const tvl = await checkTokenLiquidity(mint);
           if (tvl === null || tvl < config.minPoolTvl) {
-            logger.info(MODULE, `[OPEN] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`);
+            logger.info(
+              MODULE,
+              `[OPEN] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`,
+            );
             this.lastSkipReason = `TVL 不足 (${label} $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl})`;
             return null;
           }
@@ -544,13 +651,22 @@ export class DammV2PositionExecutor {
       }
 
       const ratio = getAmountRatio(targetWallet);
-      logger.info(MODULE, `Target amounts: A=${targetAmountA.toString()}, B=${targetAmountB.toString()}, ratio=${ratio}`);
-      logger.info(MODULE, `Our deposit target: A=${ourTokenA.toString()}, B=${ourTokenB.toString()}`);
+      logger.info(
+        MODULE,
+        `Target amounts: A=${targetAmountA.toString()}, B=${targetAmountB.toString()}, ratio=${ratio}`,
+      );
+      logger.info(
+        MODULE,
+        `Our deposit target: A=${ourTokenA.toString()}, B=${ourTokenB.toString()}`,
+      );
 
       // === PHASE 4: Pre-swap (acquire tokens if insufficient) ===
       let balanceA = await this.getTokenBalance(userAddress, mintA);
       let balanceB = await this.getTokenBalance(userAddress, mintB);
-      logger.info(MODULE, `Balances before swap: A=${balanceA.toString()}, B=${balanceB.toString()}`);
+      logger.info(
+        MODULE,
+        `Balances before swap: A=${balanceA.toString()}, B=${balanceB.toString()}`,
+      );
 
       // Swap for tokenA if deficit
       if (balanceA.lt(ourTokenA) && !ourTokenA.isZero() && mintAStr !== USDC) {
@@ -574,11 +690,16 @@ export class DammV2PositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedA = await getActualSwapOutput(this.readConnection, txSig, mintAStr, userAddress.toBase58());
+        const addedA = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintAStr,
+          userAddress.toBase58(),
+        );
         if (addedA) {
           balanceA = balanceA.add(new BN(addedA));
         } else {
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           balanceA = await this.getTokenBalance(userAddress, mintA);
         }
         balanceB = await this.getTokenBalance(userAddress, mintB);
@@ -604,11 +725,16 @@ export class DammV2PositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedB = await getActualSwapOutput(this.readConnection, txSig, mintBStr, userAddress.toBase58());
+        const addedB = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintBStr,
+          userAddress.toBase58(),
+        );
         if (addedB) {
           balanceB = balanceB.add(new BN(addedB));
         } else {
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           balanceB = await this.getTokenBalance(userAddress, mintB);
         }
       }
@@ -624,18 +750,24 @@ export class DammV2PositionExecutor {
 
       for (let openAttempt = 0; openAttempt < MAX_OPEN_ATTEMPTS; openAttempt++) {
         if (openAttempt > 0) {
-          logger.info(MODULE, `Retrying open (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying open (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
           balanceA = await this.getTokenBalance(userAddress, mintA);
           balanceB = await this.getTokenBalance(userAddress, mintB);
         }
 
-        const tokenMaxA = ourTokenA.isZero() && !ourTokenB.isZero()
-          ? balanceA : BN.min(ourTokenA, balanceA);
-        const tokenMaxB = ourTokenB.isZero() && !ourTokenA.isZero()
-          ? balanceB : BN.min(ourTokenB, balanceB);
+        const tokenMaxA =
+          ourTokenA.isZero() && !ourTokenB.isZero() ? balanceA : BN.min(ourTokenA, balanceA);
+        const tokenMaxB =
+          ourTokenB.isZero() && !ourTokenA.isZero() ? balanceB : BN.min(ourTokenB, balanceB);
 
-        logger.info(MODULE, `Position params: tokenMaxA=${tokenMaxA.toString()}, tokenMaxB=${tokenMaxB.toString()}`);
+        logger.info(
+          MODULE,
+          `Position params: tokenMaxA=${tokenMaxA.toString()}, tokenMaxB=${tokenMaxB.toString()}`,
+        );
 
         try {
           const positionNftKp = Keypair.generate();
@@ -705,25 +837,35 @@ export class DammV2PositionExecutor {
 
           const success = await this.verifyTxSuccess(addSig);
           if (!success) {
-            logger.error(MODULE, `Open TX failed on-chain: ${addSig.slice(0, 8)}, deleting mapping`);
+            logger.error(
+              MODULE,
+              `Open TX failed on-chain: ${addSig.slice(0, 8)}, deleting mapping`,
+            );
             this.positionMap.delete(targetPositionNft);
             if (openAttempt < MAX_OPEN_ATTEMPTS - 1) continue;
             return null;
           }
 
-          logger.info(MODULE, `Position opened: ${addSig} (nft=${positionNftKp.publicKey.toBase58().slice(0, 8)})`);
+          logger.info(
+            MODULE,
+            `Position opened: ${addSig} (nft=${positionNftKp.publicKey.toBase58().slice(0, 8)})`,
+          );
           return addSig;
-
         } catch (openErr: any) {
-          if (openAttempt < MAX_OPEN_ATTEMPTS - 1 && (this.isRetryableSimError(openErr) || this.isTransientError(openErr))) {
-            logger.warn(MODULE, `Open attempt ${openAttempt + 1} failed (${(openErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            openAttempt < MAX_OPEN_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(openErr) || this.isTransientError(openErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Open attempt ${openAttempt + 1} failed (${(openErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw openErr;
         }
       }
       return null;
-
     } catch (err: any) {
       logger.error(MODULE, `Open position failed: ${err.message}`);
       notifyOpenFailed(err, targetPositionNft);
@@ -736,14 +878,15 @@ export class DammV2PositionExecutor {
       return null;
     } finally {
       this.release();
-      this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+      this.getSolBalance()
+        .then((b) => {
+          this.cachedSolBalance = b;
+        })
+        .catch(() => {});
     }
   }
 
-  async copyAddLiquidity(
-    targetPositionNft: string,
-    targetWallet: string,
-  ): Promise<string | null> {
+  async copyAddLiquidity(targetPositionNft: string, targetWallet: string): Promise<string | null> {
     const myPositionNft = this.positionMap.get(targetPositionNft);
     if (!myPositionNft) {
       logger.warn(MODULE, `No mapped position for target: ${targetPositionNft.slice(0, 8)}`);
@@ -767,7 +910,7 @@ export class DammV2PositionExecutor {
       const cpAmm = new CpAmm(this.readConnection);
 
       // 2s initial delay for RPC lag
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
 
       const poolAddress = this.getPoolAddressForPosition(targetPositionNft);
       if (!poolAddress) return null;
@@ -789,7 +932,7 @@ export class DammV2PositionExecutor {
       for (let readAttempt = 0; readAttempt < 2; readAttempt++) {
         if (readAttempt > 0) {
           logger.info(MODULE, 'Delta <= 0 after detecting add TX, waiting 3s for RPC...');
-          await new Promise(r => setTimeout(r, 3000));
+          await new Promise((r) => setTimeout(r, 3000));
         }
 
         // Read target position
@@ -855,9 +998,16 @@ export class DammV2PositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedA = await getActualSwapOutput(this.readConnection, txSig, mintAStr, userAddress.toBase58());
-        if (addedA) { balanceA = balanceA.add(new BN(addedA)); } else {
-          await new Promise(r => setTimeout(r, 5000));
+        const addedA = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintAStr,
+          userAddress.toBase58(),
+        );
+        if (addedA) {
+          balanceA = balanceA.add(new BN(addedA));
+        } else {
+          await new Promise((r) => setTimeout(r, 5000));
           balanceA = await this.getTokenBalance(userAddress, mintA);
         }
         balanceB = await this.getTokenBalance(userAddress, mintB);
@@ -881,9 +1031,16 @@ export class DammV2PositionExecutor {
           return null;
         }
         invalidateHoldingsCache();
-        const addedB = await getActualSwapOutput(this.readConnection, txSig, mintBStr, userAddress.toBase58());
-        if (addedB) { balanceB = balanceB.add(new BN(addedB)); } else {
-          await new Promise(r => setTimeout(r, 5000));
+        const addedB = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintBStr,
+          userAddress.toBase58(),
+        );
+        if (addedB) {
+          balanceB = balanceB.add(new BN(addedB));
+        } else {
+          await new Promise((r) => setTimeout(r, 5000));
           balanceB = await this.getTokenBalance(userAddress, mintB);
         }
       }
@@ -893,15 +1050,15 @@ export class DammV2PositionExecutor {
       const MAX_ADD_ATTEMPTS = 2;
       for (let addAttempt = 0; addAttempt < MAX_ADD_ATTEMPTS; addAttempt++) {
         if (addAttempt > 0) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
           balanceA = await this.getTokenBalance(userAddress, mintA);
           balanceB = await this.getTokenBalance(userAddress, mintB);
         }
 
-        const tokenMaxA = increaseA.isZero() && !increaseB.isZero()
-          ? balanceA : BN.min(increaseA, balanceA);
-        const tokenMaxB = increaseB.isZero() && !increaseA.isZero()
-          ? balanceB : BN.min(increaseB, balanceB);
+        const tokenMaxA =
+          increaseA.isZero() && !increaseB.isZero() ? balanceA : BN.min(increaseA, balanceA);
+        const tokenMaxB =
+          increaseB.isZero() && !increaseA.isZero() ? balanceB : BN.min(increaseB, balanceB);
 
         try {
           // Re-fetch pool state for fresh sqrtPrice
@@ -943,7 +1100,9 @@ export class DammV2PositionExecutor {
           try {
             const updatedTargetPosPda = derivePositionAddress(new PublicKey(targetPositionNft));
             const updatedTargetPosState = await cpAmm.fetchPositionState(updatedTargetPosPda);
-            const updatedTargetLiq = new BN((updatedTargetPosState as any).unlockedLiquidity.toString());
+            const updatedTargetLiq = new BN(
+              (updatedTargetPosState as any).unlockedLiquidity.toString(),
+            );
             this.positionMap.setTargetLiquidity(targetPositionNft, updatedTargetLiq.toString());
             logger.info(MODULE, `Updated stored targetLiquidity: ${updatedTargetLiq.toString()}`);
           } catch (tlErr: any) {
@@ -951,9 +1110,11 @@ export class DammV2PositionExecutor {
           }
 
           return txSig;
-
         } catch (addErr: any) {
-          if (addAttempt < MAX_ADD_ATTEMPTS - 1 && (this.isRetryableSimError(addErr) || this.isTransientError(addErr))) {
+          if (
+            addAttempt < MAX_ADD_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(addErr) || this.isTransientError(addErr))
+          ) {
             logger.warn(MODULE, `Add attempt ${addAttempt + 1} failed, retrying...`);
             continue;
           }
@@ -961,7 +1122,6 @@ export class DammV2PositionExecutor {
         }
       }
       return null;
-
     } catch (err: any) {
       logger.error(MODULE, `Add liquidity failed: ${err.message}`);
       return null;
@@ -995,7 +1155,9 @@ export class DammV2PositionExecutor {
         const targetPosPda = derivePositionAddress(new PublicKey(targetPositionNft));
         const targetPosState = await cpAmm.fetchPositionState(targetPosPda);
         targetCurrentLiq = new BN((targetPosState as any).unlockedLiquidity.toString());
-      } catch { /* target position may be closed already → full decrease */ }
+      } catch {
+        /* target position may be closed already → full decrease */
+      }
 
       // Determine decrease amount by comparing target's current vs stored liquidity
       let decreaseAmount: BN | null = null; // null = full decrease
@@ -1008,7 +1170,10 @@ export class DammV2PositionExecutor {
             const removedLiq = storedLiq.sub(targetCurrentLiq);
             const pctNumerator = removedLiq.mul(new BN(10000));
             const pctBps = pctNumerator.div(storedLiq).toNumber();
-            logger.info(MODULE, `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`);
+            logger.info(
+              MODULE,
+              `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`,
+            );
 
             try {
               const ourPosPda = derivePositionAddress(new PublicKey(myPositionNft));
@@ -1017,9 +1182,15 @@ export class DammV2PositionExecutor {
               // ourDecrease = ourLiq * removedLiq / storedLiq
               decreaseAmount = ourLiq.mul(removedLiq).div(storedLiq);
               if (decreaseAmount.isZero()) {
-                logger.info(MODULE, 'Proportional decrease rounds to zero, collecting fees instead');
+                logger.info(
+                  MODULE,
+                  'Proportional decrease rounds to zero, collecting fees instead',
+                );
               } else {
-                logger.info(MODULE, `Our decrease: ${decreaseAmount.toString()} of ${ourLiq.toString()}`);
+                logger.info(
+                  MODULE,
+                  `Our decrease: ${decreaseAmount.toString()} of ${ourLiq.toString()}`,
+                );
               }
             } catch (err: any) {
               logger.warn(MODULE, `Cannot read our position for proportional calc: ${err.message}`);
@@ -1029,12 +1200,18 @@ export class DammV2PositionExecutor {
             this.positionMap.setTargetLiquidity(targetPositionNft, targetCurrentLiq.toString());
           } else {
             // Target liquidity >= stored — likely fee collection only
-            logger.info(MODULE, `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`);
+            logger.info(
+              MODULE,
+              `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`,
+            );
             decreaseAmount = new BN(0);
           }
         } else {
           // No stored liquidity (legacy position) — can't calculate proportion, collect fees
-          logger.info(MODULE, `No stored targetLiquidity for ${targetPositionNft.slice(0, 8)}, collecting fees (legacy position)`);
+          logger.info(
+            MODULE,
+            `No stored targetLiquidity for ${targetPositionNft.slice(0, 8)}, collecting fees (legacy position)`,
+          );
           decreaseAmount = new BN(0);
         }
       }
@@ -1075,7 +1252,10 @@ export class DammV2PositionExecutor {
 
       // Partial decrease (decreaseAmount > 0) or full decrease (decreaseAmount is null)
       const isPartial = decreaseAmount !== null;
-      logger.info(MODULE, `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myPositionNft.slice(0, 8)}...`);
+      logger.info(
+        MODULE,
+        `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myPositionNft.slice(0, 8)}...`,
+      );
 
       const MAX_DECREASE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_DECREASE_ATTEMPTS; attempt++) {
@@ -1142,14 +1322,12 @@ export class DammV2PositionExecutor {
             }
             return { txSig, type: 'DECREASE' };
           }
-
         } catch (err: any) {
           if (attempt < MAX_DECREASE_ATTEMPTS - 1 && this.isTransientError(err)) continue;
           throw err;
         }
       }
       return null;
-
     } catch (err: any) {
       logger.error(MODULE, `Remove liquidity failed: ${err.message}`);
       return null;
@@ -1181,7 +1359,7 @@ export class DammV2PositionExecutor {
       for (let attempt = 0; attempt < MAX_CLOSE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
           logger.info(MODULE, `Retrying close (attempt ${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -1193,7 +1371,8 @@ export class DammV2PositionExecutor {
           }
 
           const poolState = await cpAmm.fetchPoolState(new PublicKey(poolAddress));
-          const { tokenAProgram: _tokenAProgram, tokenBProgram: _tokenBProgram } = this.getTokenPrograms(poolState);
+          const { tokenAProgram: _tokenAProgram, tokenBProgram: _tokenBProgram } =
+            this.getTokenPrograms(poolState);
           const positionPda = derivePositionAddress(new PublicKey(myPositionNft));
           const positionNftAta = derivePositionNftAccount(new PublicKey(myPositionNft));
 
@@ -1202,7 +1381,10 @@ export class DammV2PositionExecutor {
           try {
             ourPosState = await cpAmm.fetchPositionState(positionPda);
           } catch {
-            logger.warn(MODULE, `Position not found on-chain: ${myPositionNft.slice(0, 8)}, deleting mapping`);
+            logger.warn(
+              MODULE,
+              `Position not found on-chain: ${myPositionNft.slice(0, 8)}, deleting mapping`,
+            );
             this.positionMap.delete(targetPositionNft);
             return null;
           }
@@ -1239,10 +1421,15 @@ export class DammV2PositionExecutor {
             lastTxSig = await this.signAndSend(closeTx);
             logger.info(MODULE, `Close position (empty) TX: ${lastTxSig}`);
           }
-
         } catch (closeErr: any) {
-          if (attempt < MAX_CLOSE_ATTEMPTS - 1 && (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))) {
-            logger.warn(MODULE, `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_CLOSE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw closeErr;
@@ -1258,7 +1445,10 @@ export class DammV2PositionExecutor {
           lastTxSig = null;
           continue;
         }
-        logger.error(MODULE, `Close TX failed after ${MAX_CLOSE_ATTEMPTS} attempts, keeping mapping`);
+        logger.error(
+          MODULE,
+          `Close TX failed after ${MAX_CLOSE_ATTEMPTS} attempts, keeping mapping`,
+        );
         notifyCloseFailed(myPositionNft, 'on-chain failure after max attempts', MAX_CLOSE_ATTEMPTS);
         return null;
       }
@@ -1272,14 +1462,19 @@ export class DammV2PositionExecutor {
       // Parse TX for received tokens -> queue as pending swaps
       const received = await this.parseTxTokenChanges(lastTxSig, userAddress);
       for (const { mint, amount } of received) {
-        logger.info(MODULE, `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`);
+        logger.info(
+          MODULE,
+          `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`,
+        );
         this.addPendingSwap(mint, amount);
       }
 
       return lastTxSig;
-
     } catch (err: any) {
-      logger.error(MODULE, `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`);
+      logger.error(
+        MODULE,
+        `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`,
+      );
       notifyCloseFailed(myPositionNft, err, 0);
       return null;
     } finally {
@@ -1328,7 +1523,6 @@ export class DammV2PositionExecutor {
       const txSig = await this.signAndSend(claimTx);
       logger.info(MODULE, `Fee claim TX: ${txSig}`);
       return txSig;
-
     } catch (err: any) {
       logger.error(MODULE, `Fee collection failed: ${err.message}`);
       return null;
@@ -1342,7 +1536,10 @@ export class DammV2PositionExecutor {
   async manualClosePosition(ourPositionNft: string): Promise<string | null> {
     const targetNft = this.positionMap.findByOurNft(ourPositionNft);
     if (!targetNft) {
-      logger.warn(MODULE, `Manual close: no mapping found for our position ${ourPositionNft.slice(0, 8)}`);
+      logger.warn(
+        MODULE,
+        `Manual close: no mapping found for our position ${ourPositionNft.slice(0, 8)}`,
+      );
       return null;
     }
     return this.copyClosePosition(targetNft);
@@ -1362,11 +1559,14 @@ export class DammV2PositionExecutor {
         const positionPda = derivePositionAddress(new PublicKey(entry.ourNft));
         const info = await this.readConnection.getAccountInfo(positionPda);
         if (!info) {
-          logger.warn(MODULE, `Orphan detected: target=${targetNft.slice(0, 8)}, our=${entry.ourNft.slice(0, 8)} — not found on-chain`);
+          logger.warn(
+            MODULE,
+            `Orphan detected: target=${targetNft.slice(0, 8)}, our=${entry.ourNft.slice(0, 8)} — not found on-chain`,
+          );
           this.positionMap.delete(targetNft);
         }
 
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 500));
       } catch (err: any) {
         if (this.isTransientError(err)) {
           logger.debug(MODULE, `Reconcile skipped ${targetNft.slice(0, 8)}: transient error`);
@@ -1398,7 +1598,15 @@ export class DammV2PositionExecutor {
    * Get detailed LP value breakdown for asset-trend.
    * Returns positions array and totalUsd for dashboard compatibility.
    */
-  async getPositionAssets(): Promise<Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>> {
+  async getPositionAssets(): Promise<
+    Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+    }>
+  > {
     const STABLE_MINTS = new Set([
       'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
       'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5',
@@ -1410,7 +1618,15 @@ export class DammV2PositionExecutor {
     if (dammv2Entries.length === 0) return [];
 
     const cpAmm = new CpAmm(this.readConnection);
-    const mintTotals = new Map<string, { balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>();
+    const mintTotals = new Map<
+      string,
+      {
+        balance: number;
+        decimals: number;
+        pairedStable: Record<string, number>;
+        liquidityUsd: number;
+      }
+    >();
 
     for (const [targetNft, entry] of dammv2Entries) {
       try {
@@ -1420,7 +1636,11 @@ export class DammV2PositionExecutor {
         const poolState = await cpAmm.fetchPoolState(new PublicKey(poolAddress));
         const positionPda = derivePositionAddress(new PublicKey(entry.ourNft));
         let posState: PositionState;
-        try { posState = await cpAmm.fetchPositionState(positionPda); } catch { continue; }
+        try {
+          posState = await cpAmm.fetchPositionState(positionPda);
+        } catch {
+          continue;
+        }
 
         const mintAStr = ((poolState as any).tokenAMint as PublicKey).toBase58();
         const mintBStr = ((poolState as any).tokenBMint as PublicKey).toBase58();
@@ -1438,19 +1658,33 @@ export class DammV2PositionExecutor {
         const amtA = parseFloat(withdrawQuote.outAmountA.toString()) / Math.pow(10, decA);
         const amtB = parseFloat(withdrawQuote.outAmountB.toString()) / Math.pow(10, decB);
 
-        const addToMint = (mint: string, amount: number, decimals: number, pairedMint: string, pairedAmount: number) => {
-          const existing = mintTotals.get(mint) || { balance: 0, decimals, pairedStable: {}, liquidityUsd: 0 };
+        const addToMint = (
+          mint: string,
+          amount: number,
+          decimals: number,
+          pairedMint: string,
+          pairedAmount: number,
+        ) => {
+          const existing = mintTotals.get(mint) || {
+            balance: 0,
+            decimals,
+            pairedStable: {},
+            liquidityUsd: 0,
+          };
           existing.balance += amount;
           if (STABLE_MINTS.has(pairedMint)) {
-            existing.pairedStable[pairedMint] = (existing.pairedStable[pairedMint] || 0) + pairedAmount;
+            existing.pairedStable[pairedMint] =
+              (existing.pairedStable[pairedMint] || 0) + pairedAmount;
           }
           mintTotals.set(mint, existing);
         };
 
         addToMint(mintAStr, amtA, decA, mintBStr, amtB);
         addToMint(mintBStr, amtB, decB, mintAStr, amtA);
-      } catch { /* skip */ }
-      await new Promise(r => setTimeout(r, 200));
+      } catch {
+        /* skip */
+      }
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     return Array.from(mintTotals.entries()).map(([mint, data]) => ({ mint, ...data }));
@@ -1477,7 +1711,9 @@ export class DammV2PositionExecutor {
         let posState: PositionState;
         try {
           posState = await cpAmm.fetchPositionState(positionPda);
-        } catch { continue; }
+        } catch {
+          continue;
+        }
 
         const mintAStr = ((poolState as any).tokenAMint as PublicKey).toBase58();
         const mintBStr = ((poolState as any).tokenBMint as PublicKey).toBase58();
@@ -1525,9 +1761,12 @@ export class DammV2PositionExecutor {
           feeB: feeBUi,
         });
       } catch (err: any) {
-        logger.debug(MODULE, `getDammV2LpDetails: error reading ${entry.ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`);
+        logger.debug(
+          MODULE,
+          `getDammV2LpDetails: error reading ${entry.ourNft.slice(0, 8)}: ${(err.message || '').slice(0, 80)}`,
+        );
       }
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     if (mintsNeeded.size === 0) return { positions: [], totalUsd: 0 };
@@ -1540,7 +1779,7 @@ export class DammV2PositionExecutor {
         headers: config.jupApiKey ? { 'x-api-key': config.jupApiKey } : {},
       });
       if (res.ok) {
-        const json = await res.json() as any;
+        const json = (await res.json()) as any;
         for (const [mint, info] of Object.entries(json || {})) {
           const p = (info as any)?.usdPrice;
           if (p) prices[mint] = parseFloat(String(p));
@@ -1560,7 +1799,10 @@ export class DammV2PositionExecutor {
     }
 
     const totalUsd = +(totalLpUsd + totalFeeUsd).toFixed(2);
-    logger.info(MODULE, `DAMM v2 LP: $${totalLpUsd.toFixed(2)} + fees $${totalFeeUsd.toFixed(2)} (${positions.length} positions)`);
+    logger.info(
+      MODULE,
+      `DAMM v2 LP: $${totalLpUsd.toFixed(2)} + fees $${totalFeeUsd.toFixed(2)} (${positions.length} positions)`,
+    );
     return { positions, totalUsd };
   }
 }

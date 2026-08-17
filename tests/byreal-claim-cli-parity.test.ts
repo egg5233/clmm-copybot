@@ -100,7 +100,9 @@ function makeCopyBonusDeps(options: {
         const err = options.orderErrors?.[orderAttempts++];
         if (err) throw err;
         return {
-          result: { data: { txList: [{ txSignature: 'copy-sig-1' }], claimTokenList: [token('B', '12.5')] } },
+          result: {
+            data: { txList: [{ txSignature: 'copy-sig-1' }], claimTokenList: [token('B', '12.5')] },
+          },
         };
       }
       throw new Error(`unexpected POST ${apiPath}`);
@@ -134,25 +136,44 @@ describe('claimLpFeesCliParityForTest', () => {
         if (apiPath.startsWith('position/unclaimed-data')) {
           unclaimedCalls += 1;
           if (unclaimedCalls > 1) {
-            return { result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } } };
+            return {
+              result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } },
+            };
           }
           return {
             result: {
               data: {
                 unclaimedOpenIncentives: [
-                  { positionAddress: 'reward-open', syncedTokenAmount: '2', lockedTokenAmount: '0', claimedTokenAmount: '1' },
+                  {
+                    positionAddress: 'reward-open',
+                    syncedTokenAmount: '2',
+                    lockedTokenAmount: '0',
+                    claimedTokenAmount: '1',
+                  },
                   // synced 1 - claimed 1 = 0 unclaimed, so this one must be filtered out.
-                  { positionAddress: 'reward-zero', syncedTokenAmount: '1', lockedTokenAmount: '0', claimedTokenAmount: '1' },
+                  {
+                    positionAddress: 'reward-zero',
+                    syncedTokenAmount: '1',
+                    lockedTokenAmount: '0',
+                    claimedTokenAmount: '1',
+                  },
                 ],
                 unclaimedClosedIncentives: [
-                  { positionAddress: 'reward-closed', syncedTokenAmount: '5', lockedTokenAmount: '1', claimedTokenAmount: '1' },
+                  {
+                    positionAddress: 'reward-closed',
+                    syncedTokenAmount: '5',
+                    lockedTokenAmount: '1',
+                    claimedTokenAmount: '1',
+                  },
                 ],
               },
             },
           };
         }
         if (apiPath.startsWith('position/list')) {
-          return { result: { data: { positions: [{ positionAddress: 'fee-pos-positive' }], total: 1 } } };
+          return {
+            result: { data: { positions: [{ positionAddress: 'fee-pos-positive' }], total: 1 } },
+          };
         }
         throw new Error(`unexpected GET ${apiPath}`);
       },
@@ -165,21 +186,37 @@ describe('claimLpFeesCliParityForTest', () => {
               data: {
                 orderCode: 'order-1',
                 rewardEncodeItems: [
-                  { poolAddress: 'pool-1', txCode: 'tx-1', txPayload: 'payload-1', rewardClaimInfo: [token('RWD', '3')] },
+                  {
+                    poolAddress: 'pool-1',
+                    txCode: 'tx-1',
+                    txPayload: 'payload-1',
+                    rewardClaimInfo: [token('RWD', '3')],
+                  },
                 ],
               },
             },
           };
         }
         if (apiPath === 'incentive/order-v2') {
-          return { result: { data: { txList: [{ txSignature: 'reward-sig-1' }], claimTokenList: [token('RWD', '3')] } } };
+          return {
+            result: {
+              data: {
+                txList: [{ txSignature: 'reward-sig-1' }],
+                claimTokenList: [token('RWD', '3')],
+              },
+            },
+          };
         }
         if (apiPath === 'incentive/encode-fee') {
           encodeFeeCalls += 1;
           return {
             result: {
               data: [
-                { positionAddress: 'fee-pos-positive', txPayload: 'fee-payload-1', tokens: [token('USDC', '5')] },
+                {
+                  positionAddress: 'fee-pos-positive',
+                  txPayload: 'fee-payload-1',
+                  tokens: [token('USDC', '5')],
+                },
               ],
             },
           };
@@ -188,7 +225,10 @@ describe('claimLpFeesCliParityForTest', () => {
       },
     });
 
-    expect(bodies.get('incentive/encode-v2').positionAddresses).toEqual(['reward-open', 'reward-closed']);
+    expect(bodies.get('incentive/encode-v2').positionAddresses).toEqual([
+      'reward-open',
+      'reward-closed',
+    ]);
     expect(bodies.get('incentive/encode-v2').type).toBe(1);
     expect(bodies.get('incentive/order-v2').orderCode).toBe('order-1');
     expect(bodies.get('incentive/order-v2').signedTxPayload).toEqual([
@@ -201,10 +241,12 @@ describe('claimLpFeesCliParityForTest', () => {
     expect(result.txSignatures).toEqual(['reward-sig-1', 'fee-sig-1']);
     expect(result.totalItems).toBe(result.txSignatures.length);
     expect(result.failures).toEqual([]);
-    expect(result.claimedTokens.sort((a: any, b: any) => a.symbol.localeCompare(b.symbol))).toEqual([
-      { symbol: 'RWD', amount: 3, decimals: 6 },
-      { symbol: 'USDC', amount: 5, decimals: 6 },
-    ]);
+    expect(result.claimedTokens.sort((a: any, b: any) => a.symbol.localeCompare(b.symbol))).toEqual(
+      [
+        { symbol: 'RWD', amount: 3, decimals: 6 },
+        { symbol: 'USDC', amount: 5, decimals: 6 },
+      ],
+    );
   });
 
   it('never falls back to the v3 or liquidity/send endpoints', async () => {
@@ -217,7 +259,9 @@ describe('claimLpFeesCliParityForTest', () => {
       apiGet: async (apiPath: string) => {
         calls.push(apiPath);
         if (apiPath.startsWith('position/unclaimed-data')) {
-          return { result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } } };
+          return {
+            result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } },
+          };
         }
         if (apiPath.startsWith('position/list')) {
           return { result: { data: { positions: [{ positionAddress: 'fee-pos' }], total: 1 } } };
@@ -228,7 +272,9 @@ describe('claimLpFeesCliParityForTest', () => {
         calls.push(apiPath);
         if (apiPath === 'incentive/encode-fee') {
           return {
-            result: { data: [{ positionAddress: 'fee-pos', txPayload: 'p1', tokens: [token('USDC', '5')] }] },
+            result: {
+              data: [{ positionAddress: 'fee-pos', txPayload: 'p1', tokens: [token('USDC', '5')] }],
+            },
           };
         }
         throw new Error(`unexpected POST ${apiPath}`);
@@ -254,7 +300,12 @@ describe('claimLpFeesCliParityForTest', () => {
             result: {
               data: {
                 unclaimedOpenIncentives: [
-                  { positionAddress: 'reward-pos', syncedTokenAmount: '2', lockedTokenAmount: '0', claimedTokenAmount: '1' },
+                  {
+                    positionAddress: 'reward-pos',
+                    syncedTokenAmount: '2',
+                    lockedTokenAmount: '0',
+                    claimedTokenAmount: '1',
+                  },
                 ],
                 unclaimedClosedIncentives: [],
               },
@@ -263,7 +314,12 @@ describe('claimLpFeesCliParityForTest', () => {
         }
         if (apiPath.startsWith('position/list')) {
           return {
-            result: { data: { positions: [{ positionAddress: 'fee-ok' }, { positionAddress: 'fee-fail' }], total: 2 } },
+            result: {
+              data: {
+                positions: [{ positionAddress: 'fee-ok' }, { positionAddress: 'fee-fail' }],
+                total: 2,
+              },
+            },
           };
         }
         throw new Error(`unexpected GET ${apiPath}`);
@@ -275,7 +331,12 @@ describe('claimLpFeesCliParityForTest', () => {
               data: {
                 orderCode: 'order-1',
                 rewardEncodeItems: [
-                  { poolAddress: 'pool', txCode: 'tx', txPayload: 'payload', rewardClaimInfo: [token('RWD', '99')] },
+                  {
+                    poolAddress: 'pool',
+                    txCode: 'tx',
+                    txPayload: 'payload',
+                    rewardClaimInfo: [token('RWD', '99')],
+                  },
                 ],
               },
             },
@@ -297,7 +358,11 @@ describe('claimLpFeesCliParityForTest', () => {
             result: {
               data: [
                 { positionAddress: 'fee-ok', txPayload: 'fee-ok', tokens: [token('USDC', '5')] },
-                { positionAddress: 'fee-fail', txPayload: 'fee-fail', tokens: [token('USDC', '100')] },
+                {
+                  positionAddress: 'fee-fail',
+                  txPayload: 'fee-fail',
+                  tokens: [token('USDC', '100')],
+                },
               ],
             },
           };
@@ -330,12 +395,20 @@ describe('claimLpFeesCliParityForTest', () => {
       },
       apiGet: async (apiPath: string) => {
         if (apiPath.startsWith('position/unclaimed-data')) {
-          return { result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } } };
+          return {
+            result: { data: { unclaimedOpenIncentives: [], unclaimedClosedIncentives: [] } },
+          };
         }
         if (apiPath.startsWith('position/list')) {
           return {
             result: {
-              data: { positions: [{ positionAddress: 'fee-pos-positive' }, { positionAddress: 'fee-pos-empty' }], total: 2 },
+              data: {
+                positions: [
+                  { positionAddress: 'fee-pos-positive' },
+                  { positionAddress: 'fee-pos-empty' },
+                ],
+                total: 2,
+              },
             },
           };
         }
@@ -347,7 +420,11 @@ describe('claimLpFeesCliParityForTest', () => {
           return {
             result: {
               data: [
-                { positionAddress: 'fee-pos-positive', txPayload: 'p1', tokens: [token('USDC', '5')] },
+                {
+                  positionAddress: 'fee-pos-positive',
+                  txPayload: 'p1',
+                  tokens: [token('USDC', '5')],
+                },
                 { positionAddress: 'fee-pos-empty', txPayload: 'p2', tokens: [] },
               ],
             },
@@ -484,7 +561,9 @@ describe('claimCopyBonusWithDepsForTest epoch gating', () => {
       body: {
         orderCode: 'copy-order-1',
         walletAddress: 'wallet-1',
-        signedTxPayload: [{ txCode: 'copy-tx', poolAddress: 'pool-copy', signedTx: 'signed-copy-payload' }],
+        signedTxPayload: [
+          { txCode: 'copy-tx', poolAddress: 'pool-copy', signedTx: 'signed-copy-payload' },
+        ],
       },
     });
     expect(entry.txSignatures).toEqual(['copy-sig-1']);
@@ -583,11 +662,15 @@ describe('claimCopyBonusWithDepsForTest claim loop', () => {
       encodeItems: [
         {
           orderCode: 'copy-order-1',
-          rewardEncodeItems: [{ poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' }],
+          rewardEncodeItems: [
+            { poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' },
+          ],
         },
         {
           orderCode: 'copy-order-2',
-          rewardEncodeItems: [{ poolAddress: 'pool-copy-2', txCode: 'copy-tx-2', txPayload: 'copy-payload-2' }],
+          rewardEncodeItems: [
+            { poolAddress: 'pool-copy-2', txCode: 'copy-tx-2', txPayload: 'copy-payload-2' },
+          ],
         },
       ],
     });
@@ -606,7 +689,11 @@ describe('claimCopyBonusWithDepsForTest claim loop', () => {
     const encodeItems = Array.from({ length: 12 }, (_value, index) => ({
       orderCode: `copy-order-${index}`,
       rewardEncodeItems: [
-        { poolAddress: `pool-copy-${index}`, txCode: `copy-tx-${index}`, txPayload: `copy-payload-${index}` },
+        {
+          poolAddress: `pool-copy-${index}`,
+          txCode: `copy-tx-${index}`,
+          txPayload: `copy-payload-${index}`,
+        },
       ],
     }));
     const { deps, postCalls, signCalls } = makeCopyBonusDeps({
@@ -632,7 +719,9 @@ describe('claimCopyBonusWithDepsForTest claim loop', () => {
       encodeItems: [
         {
           orderCode: 'copy-order-1',
-          rewardEncodeItems: [{ poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' }],
+          rewardEncodeItems: [
+            { poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' },
+          ],
         },
         { orderCode: 'copy-order-2', rewardEncodeItems: [] },
       ],
@@ -652,11 +741,19 @@ describe('claimCopyBonusWithDepsForTest claim loop', () => {
       encodeItems: [
         {
           orderCode: 'copy-order-1',
-          rewardEncodeItems: [{ poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' }],
+          rewardEncodeItems: [
+            { poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' },
+          ],
         },
         {
           orderCode: 'copy-order-1',
-          rewardEncodeItems: [{ poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-duplicate' }],
+          rewardEncodeItems: [
+            {
+              poolAddress: 'pool-copy-1',
+              txCode: 'copy-tx-1',
+              txPayload: 'copy-payload-duplicate',
+            },
+          ],
         },
       ],
     });
@@ -672,8 +769,14 @@ describe('claimCopyBonusWithDepsForTest claim loop', () => {
 
   const terminalEpochs = [
     { label: 'the epoch payload goes empty', epoch: {} },
-    { label: 'the bonus becomes unparseable', epoch: { '3': claimableEpoch({ totalBonusUsd: 'bad' }) } },
-    { label: 'the claim window has not opened yet', epoch: { '3': claimableEpoch({ claimTime: 1500 }) } },
+    {
+      label: 'the bonus becomes unparseable',
+      epoch: { '3': claimableEpoch({ totalBonusUsd: 'bad' }) },
+    },
+    {
+      label: 'the claim window has not opened yet',
+      epoch: { '3': claimableEpoch({ claimTime: 1500 }) },
+    },
     { label: 'the claim window has closed', epoch: { '3': claimableEpoch({ endTime: 1000 }) } },
   ];
 
@@ -684,7 +787,9 @@ describe('claimCopyBonusWithDepsForTest claim loop', () => {
         encodeItems: [
           {
             orderCode: 'copy-order-1',
-            rewardEncodeItems: [{ poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' }],
+            rewardEncodeItems: [
+              { poolAddress: 'pool-copy-1', txCode: 'copy-tx-1', txPayload: 'copy-payload-1' },
+            ],
           },
         ],
       });

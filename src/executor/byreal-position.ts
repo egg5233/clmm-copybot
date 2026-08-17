@@ -1,21 +1,60 @@
 import fs from 'fs';
 import path from 'path';
-import { AccountInfo, ComputeBudgetProgram, Connection, PublicKey, Signer, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync, NATIVE_MINT, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
+import {
+  AccountInfo,
+  ComputeBudgetProgram,
+  Connection,
+  PublicKey,
+  Signer,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js';
+import {
+  getAssociatedTokenAddressSync,
+  NATIVE_MINT,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+} from '@solana/spl-token';
 import BN from 'bn.js';
-import { Chain, MEMO_PROGRAM_ID, IGetPositionInfoByNftMintReturn, PoolLayout, PersonalPositionLayout, SqrtPriceMath, LiquidityMath } from 'byreal-clmm-sdk-alpha';
+import {
+  Chain,
+  MEMO_PROGRAM_ID,
+  IGetPositionInfoByNftMintReturn,
+  PoolLayout,
+  PersonalPositionLayout,
+  SqrtPriceMath,
+  LiquidityMath,
+} from 'byreal-clmm-sdk-alpha';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { getUserAddress, signerCallback } from '../utils/wallet';
 import { scaleAmount } from '../utils/ratio';
-import { swapForToken, swapViaByrealPool, getActualSwapOutput, jupSwapExactIn, lastSwapError } from './jupiter-swap';
+import {
+  swapForToken,
+  swapViaByrealPool,
+  getActualSwapOutput,
+  jupSwapExactIn,
+  lastSwapError,
+} from './jupiter-swap';
 import { PositionMap } from '../state/position-map';
 import { OperationQueue } from './queue';
-import { notifySolInsufficient, notifyOpenFailed, notifyCloseFailed, notifySwapFailed, notifyPumpApproval } from '../discord/notify';
+import {
+  notifySolInsufficient,
+  notifyOpenFailed,
+  notifyCloseFailed,
+  notifySwapFailed,
+  notifyPumpApproval,
+} from '../discord/notify';
 import { getPoolInfo, checkTokenLiquidity } from '../monitor/pool-tvl';
 import { getLatestTotalUsd } from '../state/portfolio-state';
 import { getAmountRatio } from '../utils/ratio';
-import { isPumpPending, isPumpApproved, isPumpRejected, addPumpPending } from '../state/pump-pending';
+import {
+  isPumpPending,
+  isPumpApproved,
+  isPumpRejected,
+  addPumpPending,
+} from '../state/pump-pending';
 import { classifyByrealReconcilePosition, classifyByrealReconcileTarget } from './reconcile-status';
 import { ByrealNftAuditResult, diffByrealNftAudit } from './byreal-nft-audit';
 import { isRefererDuplicateEntry } from '../utils/byreal-allow-same-tick';
@@ -27,7 +66,10 @@ import { isPoolAgeWhitelisted } from '../utils/pool-age-whitelist';
  */
 function patchConnectionChunking(conn: Connection): void {
   const original = conn.getMultipleAccountsInfo.bind(conn);
-  conn.getMultipleAccountsInfo = async (keys: PublicKey[], ...args: any[]): Promise<(AccountInfo<Buffer> | null)[]> => {
+  conn.getMultipleAccountsInfo = async (
+    keys: PublicKey[],
+    ...args: any[]
+  ): Promise<(AccountInfo<Buffer> | null)[]> => {
     if (keys.length <= 100) return original(keys, ...args);
     const results: (AccountInfo<Buffer> | null)[] = [];
     for (let i = 0; i < keys.length; i += 100) {
@@ -40,7 +82,8 @@ function patchConnectionChunking(conn: Connection): void {
 }
 
 const MODULE = 'ByrealPos';
-const POSITION_GONE_RE = /\b(not found|does not exist|account not found|account does not exist|could not find|position not found)\b/i;
+const POSITION_GONE_RE =
+  /\b(not found|does not exist|account not found|account does not exist|could not find|position not found)\b/i;
 
 function isPositionGoneError(err: any): boolean {
   const msg = typeof err?.message === 'string' ? err.message : String(err || '');
@@ -53,7 +96,9 @@ function isComputeBudgetInstructionType(ix: TransactionInstruction, type: number
   return data[0] === type;
 }
 
-export function stripByrealComputeUnitPriceInstructions(instructions: TransactionInstruction[]): TransactionInstruction[] {
+export function stripByrealComputeUnitPriceInstructions(
+  instructions: TransactionInstruction[],
+): TransactionInstruction[] {
   return instructions.filter((ix) => !isComputeBudgetInstructionType(ix, 3));
 }
 
@@ -64,23 +109,27 @@ async function estimateByrealComputeUnitLimit(
   blockhash: string,
 ): Promise<number> {
   try {
-    const filteredInstructions = instructions.filter((ix) => !isComputeBudgetInstructionType(ix, 2));
+    const filteredInstructions = instructions.filter(
+      (ix) => !isComputeBudgetInstructionType(ix, 2),
+    );
     const simulationInstructions = [
       ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
       ...filteredInstructions,
     ];
-    const simulationTx = new VersionedTransaction(new TransactionMessage({
-      payerKey: payerPublicKey,
-      recentBlockhash: blockhash,
-      instructions: simulationInstructions,
-    }).compileToV0Message());
+    const simulationTx = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: payerPublicKey,
+        recentBlockhash: blockhash,
+        instructions: simulationInstructions,
+      }).compileToV0Message(),
+    );
     const simulation = await connection.simulateTransaction(simulationTx);
     if (simulation.value.logs && simulation.value.unitsConsumed) {
       const consumedUnits = simulation.value.unitsConsumed;
-      const estimatedUnits = Math.min(Math.max(
-        consumedUnits + 100_000,
-        Math.ceil(consumedUnits * 1.3),
-      ), 1_400_000);
+      const estimatedUnits = Math.min(
+        Math.max(consumedUnits + 100_000, Math.ceil(consumedUnits * 1.3)),
+        1_400_000,
+      );
       return Math.max(estimatedUnits, 100_000);
     }
   } catch (error) {
@@ -99,21 +148,32 @@ export async function makeByrealZeroPriorityTransaction(params: {
   const { connection, payerPublicKey, signers = [] } = params;
   const { blockhash } = await connection.getLatestBlockhash();
   const cleanedInstructions = stripByrealComputeUnitPriceInstructions(params.instructions);
-  const hasComputeUnitLimit = cleanedInstructions.some((ix) => isComputeBudgetInstructionType(ix, 2));
+  const hasComputeUnitLimit = cleanedInstructions.some((ix) =>
+    isComputeBudgetInstructionType(ix, 2),
+  );
   const finalInstructions = hasComputeUnitLimit
     ? cleanedInstructions
     : [
-      ComputeBudgetProgram.setComputeUnitLimit({
-        units: params.computeUnitLimit ?? await estimateByrealComputeUnitLimit(connection, cleanedInstructions, payerPublicKey, blockhash),
-      }),
-      ...cleanedInstructions,
-    ];
+        ComputeBudgetProgram.setComputeUnitLimit({
+          units:
+            params.computeUnitLimit ??
+            (await estimateByrealComputeUnitLimit(
+              connection,
+              cleanedInstructions,
+              payerPublicKey,
+              blockhash,
+            )),
+        }),
+        ...cleanedInstructions,
+      ];
 
-  const tx = new VersionedTransaction(new TransactionMessage({
-    payerKey: payerPublicKey,
-    recentBlockhash: blockhash,
-    instructions: finalInstructions,
-  }).compileToV0Message());
+  const tx = new VersionedTransaction(
+    new TransactionMessage({
+      payerKey: payerPublicKey,
+      recentBlockhash: blockhash,
+      instructions: finalInstructions,
+    }).compileToV0Message(),
+  );
   if (signers.length > 0) tx.sign(signers);
   return tx;
 }
@@ -207,7 +267,7 @@ export class ByrealPositionExecutor {
       connection: this.readConnection, // Alchemy — SDK read-only ops (save Helius credits)
       programId: config.byrealProgramId,
     });
-    this.freechains = config.rpcUrlsFree.map(url => {
+    this.freechains = config.rpcUrlsFree.map((url) => {
       const conn = new Connection(url, { commitment: 'confirmed' });
       patchConnectionChunking(conn);
       return new Chain({ connection: conn, programId: config.byrealProgramId });
@@ -226,12 +286,21 @@ export class ByrealPositionExecutor {
       logger.info(MODULE, `Found ${pendingCount} pending swaps on disk`);
     }
     // Fetch initial SOL balance
-    this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+    this.getSolBalance()
+      .then((b) => {
+        this.cachedSolBalance = b;
+      })
+      .catch(() => {});
   }
 
-  get isBusy(): boolean { return this.busy; }
+  get isBusy(): boolean {
+    return this.busy;
+  }
 
-  private async makeSdkTransactionWithoutPriorityFee(result: { instructions: TransactionInstruction[]; signers?: Signer[] }): Promise<VersionedTransaction> {
+  private async makeSdkTransactionWithoutPriorityFee(result: {
+    instructions: TransactionInstruction[];
+    signers?: Signer[];
+  }): Promise<VersionedTransaction> {
     return makeByrealZeroPriorityTransaction({
       connection: this.connection,
       payerPublicKey: getUserAddress(),
@@ -274,15 +343,24 @@ export class ByrealPositionExecutor {
     if (pnlUsd < 0) {
       const streak = (this.tokenLossStreak.get(token) || 0) + 1;
       this.tokenLossStreak.set(token, streak);
-      logger.info(MODULE, `Token ${token.slice(0, 8)}… PnL $${pnlUsd.toFixed(2)} (連續虧損 ${streak} 次)`);
+      logger.info(
+        MODULE,
+        `Token ${token.slice(0, 8)}… PnL $${pnlUsd.toFixed(2)} (連續虧損 ${streak} 次)`,
+      );
       if (streak >= config.tokenLossStreakLimit && config.tokenLossStreakLimit > 0) {
         // 白名單豁免：連虧仍計入統計，但跳過冷卻
         if (config.tokenWhitelist.has(token)) {
-          logger.info(MODULE, `Token ${token.slice(0, 8)}… 在白名單中，跳過冷卻 (連虧 ${streak} 次仍計入)`);
+          logger.info(
+            MODULE,
+            `Token ${token.slice(0, 8)}… 在白名單中，跳過冷卻 (連虧 ${streak} 次仍計入)`,
+          );
         } else {
           const until = Date.now() + config.tokenCooldownMinutes * 60 * 1000;
           this.tokenCooldowns.set(token, until);
-          logger.warn(MODULE, `Token ${token.slice(0, 8)}… 連續虧損 ${streak} 次，冷靜 ${config.tokenCooldownMinutes} 分鐘`);
+          logger.warn(
+            MODULE,
+            `Token ${token.slice(0, 8)}… 連續虧損 ${streak} 次，冷靜 ${config.tokenCooldownMinutes} 分鐘`,
+          );
         }
       }
     } else {
@@ -333,7 +411,7 @@ export class ByrealPositionExecutor {
       } catch {
         // RPC error, skip
       }
-      await new Promise(r => setTimeout(r, 300)); // Rate limit
+      await new Promise((r) => setTimeout(r, 300)); // Rate limit
     }
     logger.info(MODULE, `Backfill complete: ${filled}/${missing.length} positions updated`);
   }
@@ -356,9 +434,15 @@ export class ByrealPositionExecutor {
       const METADATA_TRANSFER = 1_322_400;
       const totalLamports = rentPDA + rentMint + METADATA_TRANSFER + rentATA;
       this.rentPerPosition = totalLamports / 1e9;
-      logger.info(MODULE, `Rent per position: ${this.rentPerPosition} SOL (${totalLamports} lamports = PDA:${rentPDA} + Mint:${rentMint} + Meta:${METADATA_TRANSFER} + ATA:${rentATA})`);
+      logger.info(
+        MODULE,
+        `Rent per position: ${this.rentPerPosition} SOL (${totalLamports} lamports = PDA:${rentPDA} + Mint:${rentMint} + Meta:${METADATA_TRANSFER} + ATA:${rentATA})`,
+      );
     } catch (err: any) {
-      logger.warn(MODULE, `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`);
+      logger.warn(
+        MODULE,
+        `Failed to query rent exemption, using fallback ${this.rentPerPosition}: ${err.message}`,
+      );
     }
   }
 
@@ -370,7 +454,10 @@ export class ByrealPositionExecutor {
   backfillLockedSol(): void {
     const missing = this.positionMap.entriesMissingLockedSol();
     if (missing.length === 0) return;
-    logger.info(MODULE, `Backfilling lockedSol for ${missing.length} positions (${this.rentPerPosition} SOL each)`);
+    logger.info(
+      MODULE,
+      `Backfilling lockedSol for ${missing.length} positions (${this.rentPerPosition} SOL each)`,
+    );
     for (const [targetNft] of missing) {
       this.positionMap.setLockedSol(targetNft, this.rentPerPosition);
     }
@@ -412,17 +499,20 @@ export class ByrealPositionExecutor {
     }
   }
 
-
   /** Check if we have a mapping for a target NFT. */
   hasMapping(targetNftMint: string): boolean {
     return !!this.positionMap.get(targetNftMint);
   }
 
   /** Read pending swaps (public for dashboard). */
-  getPendingSwaps(): Record<string, any> { return this.readPendingFile(); }
+  getPendingSwaps(): Record<string, any> {
+    return this.readPendingFile();
+  }
 
   /** Read opened referers (public for dashboard). */
-  getOpenedReferers(): Record<string, any> { return this.readRefererFile(); }
+  getOpenedReferers(): Record<string, any> {
+    return this.readRefererFile();
+  }
 
   /** Check if a referer position was already opened (public for skip detection). */
   isRefererDuplicate(refererPosition: string | null, targetWallet: string): boolean {
@@ -437,7 +527,10 @@ export class ByrealPositionExecutor {
     );
   }
 
-  private _walletBalancesCache: { items: Array<{ mint: string; amount: string; decimals: number }>; ts: number } | null = null;
+  private _walletBalancesCache: {
+    items: Array<{ mint: string; amount: string; decimals: number }>;
+    ts: number;
+  } | null = null;
   private static WALLET_BALANCES_TTL = 5 * 60 * 1000; // 5 min — synced with asset-trend interval
 
   /**
@@ -446,7 +539,10 @@ export class ByrealPositionExecutor {
    * Returns full list — callers filter at display time.
    */
   async getWalletTokenBalances(): Promise<{ mint: string; amount: string; decimals: number }[]> {
-    if (this._walletBalancesCache && Date.now() - this._walletBalancesCache.ts < ByrealPositionExecutor.WALLET_BALANCES_TTL) {
+    if (
+      this._walletBalancesCache &&
+      Date.now() - this._walletBalancesCache.ts < ByrealPositionExecutor.WALLET_BALANCES_TTL
+    ) {
       return this._walletBalancesCache.items;
     }
 
@@ -458,7 +554,10 @@ export class ByrealPositionExecutor {
       this._walletBalancesCache = { items, ts: Date.now() };
       return items;
     } catch (err: any) {
-      logger.warn(MODULE, `Jupiter holdings failed, falling back to RPC: ${(err.message || '').slice(0, 120)}`);
+      logger.warn(
+        MODULE,
+        `Jupiter holdings failed, falling back to RPC: ${(err.message || '').slice(0, 120)}`,
+      );
     }
 
     // Fallback: RPC round-robin
@@ -478,12 +577,14 @@ export class ByrealPositionExecutor {
     return [];
   }
 
-  private async fetchBalancesViaJupiter(addressBase58: string): Promise<Array<{ mint: string; amount: string; decimals: number }>> {
+  private async fetchBalancesViaJupiter(
+    addressBase58: string,
+  ): Promise<Array<{ mint: string; amount: string; decimals: number }>> {
     const headers: Record<string, string> = {};
     if (config.jupApiKey) headers['x-api-key'] = config.jupApiKey;
     const res = await fetch(`https://api.jup.ag/ultra/v1/holdings/${addressBase58}`, { headers });
     if (!res.ok) throw new Error(`Jupiter holdings HTTP ${res.status}`);
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
 
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     const results: Array<{ mint: string; amount: string; decimals: number }> = [];
@@ -502,8 +603,8 @@ export class ByrealPositionExecutor {
           if (acc.amount) total = total.add(new BN(String(acc.amount)));
           if (acc.decimals != null) decimals = acc.decimals;
         }
-        if (decimals === 0) continue;              // 跳過 NFT（沿用 RPC heuristic）
-        if (total.lte(new BN(1000))) continue;    // dust filter
+        if (decimals === 0) continue; // 跳過 NFT（沿用 RPC heuristic）
+        if (total.lte(new BN(1000))) continue; // dust filter
         results.push({ mint, amount: total.toString(), decimals });
       }
     }
@@ -511,7 +612,9 @@ export class ByrealPositionExecutor {
     return results;
   }
 
-  private async fetchBalancesViaRpc(owner: PublicKey): Promise<Array<{ mint: string; amount: string; decimals: number }>> {
+  private async fetchBalancesViaRpc(
+    owner: PublicKey,
+  ): Promise<Array<{ mint: string; amount: string; decimals: number }>> {
     const freeUrl = config.rpcUrlsFree[this.freechainIdx % config.rpcUrlsFree.length];
     this.freechainIdx++;
     const conn = new Connection(freeUrl, { commitment: 'confirmed' });
@@ -549,12 +652,15 @@ export class ByrealPositionExecutor {
    * Swap token to USDC.
    * @param maxAmountRaw max raw amount to swap. If provided, swap min(maxAmountRaw, balance). If omitted, swap full balance.
    */
-  async swapTokenToUSDC(inputMint: string, maxAmountRaw?: string): Promise<{ sig: string; amountRaw: string; outputRaw?: string } | null> {
+  async swapTokenToUSDC(
+    inputMint: string,
+    maxAmountRaw?: string,
+  ): Promise<{ sig: string; amountRaw: string; outputRaw?: string } | null> {
     const SKIP_MINTS = new Set([
       'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
       'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5', // USDT (SPL)
       'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT (Token2022)
-      NATIVE_MINT.toBase58(),                            // SOL
+      NATIVE_MINT.toBase58(), // SOL
     ]);
     if (SKIP_MINTS.has(inputMint)) {
       logger.debug(MODULE, `swapTokenToUSDC: skipping stablecoin/SOL ${inputMint.slice(0, 8)}`);
@@ -576,10 +682,16 @@ export class ByrealPositionExecutor {
       }
     }
     if (swapAmount.lte(new BN(1000))) {
-      logger.debug(MODULE, `swapTokenToUSDC: amount too small for ${inputMint.slice(0, 8)} (${swapAmount.toString()})`);
+      logger.debug(
+        MODULE,
+        `swapTokenToUSDC: amount too small for ${inputMint.slice(0, 8)} (${swapAmount.toString()})`,
+      );
       return null;
     }
-    logger.info(MODULE, `Swap to USDC: ${inputMint.slice(0, 8)}... amount=${swapAmount.toString()}${maxAmountRaw ? ` (capped, balance=${balance.toString()})` : ''}`);
+    logger.info(
+      MODULE,
+      `Swap to USDC: ${inputMint.slice(0, 8)}... amount=${swapAmount.toString()}${maxAmountRaw ? ` (capped, balance=${balance.toString()})` : ''}`,
+    );
 
     const amountRaw = swapAmount.toString();
 
@@ -598,7 +710,13 @@ export class ByrealPositionExecutor {
         // Parse TX to get actual USDC received
         let outputRaw: string | undefined;
         try {
-          outputRaw = await getActualSwapOutput(this.readConnection, sig, USDC_MINT, getUserAddress().toBase58()) || undefined;
+          outputRaw =
+            (await getActualSwapOutput(
+              this.readConnection,
+              sig,
+              USDC_MINT,
+              getUserAddress().toBase58(),
+            )) || undefined;
           if (outputRaw) logger.info(MODULE, `USDC received: ${outputRaw} (raw)`);
         } catch {}
         return { sig, amountRaw, outputRaw };
@@ -638,8 +756,11 @@ export class ByrealPositionExecutor {
       const MAX_CLOSE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_CLOSE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Retrying manual close (attempt ${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying manual close (attempt ${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -652,7 +773,9 @@ export class ByrealPositionExecutor {
               });
               const tx = await this.makeSdkTransactionWithoutPriorityFee(result);
               const signed = await signerCallback(tx);
-              return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+              return this.connection.sendTransaction(signed, {
+                skipPreflight: config.skipPreflight,
+              });
             },
             `manualClose(${ourNftMint.slice(0, 8)})`,
           );
@@ -666,8 +789,14 @@ export class ByrealPositionExecutor {
 
           return txSig;
         } catch (closeErr: any) {
-          if (attempt < MAX_CLOSE_ATTEMPTS - 1 && (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))) {
-            logger.warn(MODULE, `Manual close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_CLOSE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Manual close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw closeErr;
@@ -682,9 +811,15 @@ export class ByrealPositionExecutor {
         if (staleTargetNft) {
           this.positionMap.delete(staleTargetNft);
           this.removeReferer(staleTargetNft);
-          logger.warn(MODULE, `Manual close skipped: position already gone on-chain, mapping removed: ${ourNftMint.slice(0, 8)}`);
+          logger.warn(
+            MODULE,
+            `Manual close skipped: position already gone on-chain, mapping removed: ${ourNftMint.slice(0, 8)}`,
+          );
         } else {
-          logger.warn(MODULE, `Manual close skipped: position already gone on-chain and no mapping found: ${ourNftMint.slice(0, 8)}`);
+          logger.warn(
+            MODULE,
+            `Manual close skipped: position already gone on-chain and no mapping found: ${ourNftMint.slice(0, 8)}`,
+          );
         }
         return null;
       }
@@ -713,12 +848,18 @@ export class ByrealPositionExecutor {
     // Use actual wallet balance (more accurate than pending number)
     const balance = await this.getTokenBalance(getUserAddress(), new PublicKey(inputMint));
     if (balance.lte(new BN(1000))) {
-      logger.warn(MODULE, `forceSwap: wallet balance is dust for ${inputMint.slice(0, 8)}, clearing pending`);
+      logger.warn(
+        MODULE,
+        `forceSwap: wallet balance is dust for ${inputMint.slice(0, 8)}, clearing pending`,
+      );
       this.clearPending(inputMint);
       return null;
     }
 
-    logger.info(MODULE, `Force swap: ${inputMint.slice(0, 8)}... balance=${balance.toString()} -> USDC`);
+    logger.info(
+      MODULE,
+      `Force swap: ${inputMint.slice(0, 8)}... balance=${balance.toString()} -> USDC`,
+    );
 
     if (config.dryRun) {
       logger.info(MODULE, '[DRY RUN] Would force swap to USDC');
@@ -795,7 +936,10 @@ export class ByrealPositionExecutor {
         return { totalPositions: nftMintList.length, txCount: 0, results: [] };
       }
 
-      logger.info(MODULE, `Claim-all: building batched instructions for ${nftMintList.length} positions`);
+      logger.info(
+        MODULE,
+        `Claim-all: building batched instructions for ${nftMintList.length} positions`,
+      );
       const { instructionsList } = await this.chain.collectAllPositionFeesInstructions({
         userAddress,
         nftMintList,
@@ -806,19 +950,27 @@ export class ByrealPositionExecutor {
       for (let i = 0; i < instructionsList.length; i++) {
         const instructions = instructionsList[i];
         try {
-          const txSig = await this.retryOnTransient(async () => {
-            const tx = await makeByrealZeroPriorityTransaction({
-              connection: this.connection,
-              payerPublicKey: userAddress,
-              instructions,
-            });
-            const signed = await signerCallback(tx);
-            return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
-          }, `collectAllFees-batch-${i + 1}/${instructionsList.length}`);
+          const txSig = await this.retryOnTransient(
+            async () => {
+              const tx = await makeByrealZeroPriorityTransaction({
+                connection: this.connection,
+                payerPublicKey: userAddress,
+                instructions,
+              });
+              const signed = await signerCallback(tx);
+              return this.connection.sendTransaction(signed, {
+                skipPreflight: config.skipPreflight,
+              });
+            },
+            `collectAllFees-batch-${i + 1}/${instructionsList.length}`,
+          );
           logger.info(MODULE, `Claim-all batch ${i + 1}/${instructionsList.length} OK: ${txSig}`);
           results.push({ txSig, positionCount: instructions.length });
         } catch (err: any) {
-          logger.error(MODULE, `Claim-all batch ${i + 1}/${instructionsList.length} failed: ${err.message || err}`);
+          logger.error(
+            MODULE,
+            `Claim-all batch ${i + 1}/${instructionsList.length} failed: ${err.message || err}`,
+          );
           results.push({ error: err.message || String(err), positionCount: instructions.length });
         }
       }
@@ -850,13 +1002,19 @@ export class ByrealPositionExecutor {
   ): Promise<string | null> {
     // Guard: prevent duplicate open for the same target position
     if (this.positionMap.get(targetNftMint)) {
-      logger.warn(MODULE, `Already have mapping for target NFT ${targetNftMint.slice(0, 8)}, skipping duplicate open`);
+      logger.warn(
+        MODULE,
+        `Already have mapping for target NFT ${targetNftMint.slice(0, 8)}, skipping duplicate open`,
+      );
       return null;
     }
 
     // Guard: prevent duplicate open for the same provider position (multiple targets copying same provider)
     if (refererPosition && this.isRefererDuplicate(refererPosition, targetWallet || '')) {
-      logger.info(MODULE, `Duplicate referer ${refererPosition.slice(0, 8)}, already opened — skipping`);
+      logger.info(
+        MODULE,
+        `Duplicate referer ${refererPosition.slice(0, 8)}, already opened — skipping`,
+      );
       return null;
     }
 
@@ -908,7 +1066,10 @@ export class ByrealPositionExecutor {
       // 2a. Duplicate tick range check (optional, controlled by SKIP_SAME_TICK_RANGE)
       if (config.skipSameTickRange && targetWallet) {
         if (this.positionMap.hasDuplicateTickRange(targetWallet, poolLabel, tickLower, tickUpper)) {
-          logger.info(MODULE, `[OPEN] Skipped — same wallet already has open position in ${poolLabel} at ticks [${tickLower}, ${tickUpper}]`);
+          logger.info(
+            MODULE,
+            `[OPEN] Skipped — same wallet already has open position in ${poolLabel} at ticks [${tickLower}, ${tickUpper}]`,
+          );
           this.lastSkipReason = '重複 tick 範圍';
           return null;
         }
@@ -916,8 +1077,11 @@ export class ByrealPositionExecutor {
 
       // 2b. Pump token filter (tri-state: off / full / discord)
       if (config.pumpFilterMode !== 'off') {
-        const pumpMint = mintAStr.toLowerCase().includes('pump') ? mintAStr
-          : mintBStr.toLowerCase().includes('pump') ? mintBStr : null;
+        const pumpMint = mintAStr.toLowerCase().includes('pump')
+          ? mintAStr
+          : mintBStr.toLowerCase().includes('pump')
+            ? mintBStr
+            : null;
         if (pumpMint) {
           // Already approved via whitelist or pump-pending → allow
           if (!isPumpApproved(pumpMint)) {
@@ -934,8 +1098,16 @@ export class ByrealPositionExecutor {
             }
             if (!isPumpPending(pumpMint)) {
               const symbol = this.getTokenSymbol(pumpMint);
-              addPumpPending({ mint: pumpMint, symbol, pool: `${mintAStr}/${mintBStr}`, targetWallet: targetWallet || '', detectedAt: Date.now() });
-              notifyPumpApproval(pumpMint, symbol, `${mintAStr}/${mintBStr}`).catch((e: any) => logger.warn(MODULE, `Pump notify failed: ${e.message}`));
+              addPumpPending({
+                mint: pumpMint,
+                symbol,
+                pool: `${mintAStr}/${mintBStr}`,
+                targetWallet: targetWallet || '',
+                detectedAt: Date.now(),
+              });
+              notifyPumpApproval(pumpMint, symbol, `${mintAStr}/${mintBStr}`).catch((e: any) =>
+                logger.warn(MODULE, `Pump notify failed: ${e.message}`),
+              );
             }
             logger.info(MODULE, `[OPEN] Skipped — pump token pending approval (${pumpMint})`);
             this.lastSkipReason = 'Pump 代幣等待確認';
@@ -945,13 +1117,19 @@ export class ByrealPositionExecutor {
       }
 
       // 2c. Pool age filter (optional, controlled by MIN_POOL_AGE_DAYS)
-      if (config.minPoolAgeDays > 0 && !isPoolAgeWhitelisted(mintAStr, mintBStr, config.poolAgeWhitelist)) {
+      if (
+        config.minPoolAgeDays > 0 &&
+        !isPoolAgeWhitelisted(mintAStr, mintBStr, config.poolAgeWhitelist)
+      ) {
         const poolEntry = getPoolInfo(mintAStr);
         if (poolEntry && poolEntry.openTime > 0) {
           const ageSeconds = Math.floor(Date.now() / 1000) - poolEntry.openTime;
           if (ageSeconds < config.minPoolAgeDays * 86400) {
             const ageDays = (ageSeconds / 86400).toFixed(1);
-            logger.info(MODULE, `[OPEN] Skipped — pool too new (${ageDays}d < ${config.minPoolAgeDays}d) for ${mintAStr.slice(0, 8)}`);
+            logger.info(
+              MODULE,
+              `[OPEN] Skipped — pool too new (${ageDays}d < ${config.minPoolAgeDays}d) for ${mintAStr.slice(0, 8)}`,
+            );
             this.lastSkipReason = `池子太新 (${ageDays}d < ${config.minPoolAgeDays}d)`;
             return null;
           }
@@ -960,12 +1138,18 @@ export class ByrealPositionExecutor {
 
       // 2d. Pool TVL filter (optional, controlled by MIN_POOL_TVL)
       if (config.minPoolTvl > 0) {
-        for (const [mint, label] of [[mintAStr, 'mintA'], [mintBStr, 'mintB']] as [string, string][]) {
+        for (const [mint, label] of [
+          [mintAStr, 'mintA'],
+          [mintBStr, 'mintB'],
+        ] as [string, string][]) {
           if (config.poolTvlWhitelist.has(mint)) continue;
           if (STABLE_MINTS.has(mint)) continue;
           const tvl = await checkTokenLiquidity(mint);
           if (tvl === null || tvl < config.minPoolTvl) {
-            logger.info(MODULE, `[OPEN] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`);
+            logger.info(
+              MODULE,
+              `[OPEN] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`,
+            );
             this.lastSkipReason = `TVL 不足 (${label} $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl})`;
             return null;
           }
@@ -974,8 +1158,11 @@ export class ByrealPositionExecutor {
 
       // 2e. Concentration filter (optional, controlled by MAX_COIN_CONCENTRATION_USD/PCT)
       const concSkip = this.checkConcentrationLimit(
-        mintAStr, mintBStr, targetWallet,
-        positionInfo.tokenA.uiAmount, positionInfo.tokenB.uiAmount,
+        mintAStr,
+        mintBStr,
+        targetWallet,
+        positionInfo.tokenA.uiAmount,
+        positionInfo.tokenB.uiAmount,
         rawPoolInfo,
         'OPEN',
       );
@@ -990,13 +1177,19 @@ export class ByrealPositionExecutor {
       const targetA = scaleAmount(positionInfo.tokenA.amount, targetWallet);
       const targetB = scaleAmount(positionInfo.tokenB.amount, targetWallet);
 
-      logger.info(MODULE, `Target deposited: A=${positionInfo.tokenA.uiAmount}, B=${positionInfo.tokenB.uiAmount}`);
+      logger.info(
+        MODULE,
+        `Target deposited: A=${positionInfo.tokenA.uiAmount}, B=${positionInfo.tokenB.uiAmount}`,
+      );
       logger.info(MODULE, `Our target (raw): A=${targetA.toString()}, B=${targetB.toString()}`);
 
       // 3. Check our balances — swap if insufficient
       let ourBalanceA = await this.getTokenBalance(userAddress, mintA);
       let ourBalanceB = await this.getTokenBalance(userAddress, mintB);
-      logger.info(MODULE, `Our balances before swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`);
+      logger.info(
+        MODULE,
+        `Our balances before swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`,
+      );
 
       // Swap for tokenA if we don't have enough
       if (ourBalanceA.lt(targetA) && !targetA.isZero()) {
@@ -1006,13 +1199,20 @@ export class ByrealPositionExecutor {
 
         if (mintA.equals(NATIVE_MINT)) {
           // SOL deficit: only try USDC→SOL
-          if (mintAStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
+          if (mintAStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
         } else {
           // Try 1: swap tokenB → tokenA (if we have tokenB)
           if (!ourBalanceB.isZero()) {
             txSig = await swapForToken(this.connection, mintBStr, mintAStr, deficit.toString());
             if (!txSig) {
-              txSig = await swapViaByrealPool(this.chain, rawPoolInfo, mintB, mintA, deficit.toString());
+              txSig = await swapViaByrealPool(
+                this.chain,
+                rawPoolInfo,
+                mintB,
+                mintA,
+                deficit.toString(),
+              );
             }
           }
 
@@ -1028,15 +1228,23 @@ export class ByrealPositionExecutor {
           notifySwapFailed(mintAStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const addedA = await getActualSwapOutput(this.readConnection, txSig, mintAStr, userAddress.toBase58());
+        const addedA = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintAStr,
+          userAddress.toBase58(),
+        );
         if (addedA) {
           ourBalanceA = ourBalanceA.add(new BN(addedA));
         } else {
           logger.warn(MODULE, 'Could not parse swap TX, waiting 5s then re-reading balance');
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           ourBalanceA = await this.getTokenBalance(userAddress, mintA);
         }
-        logger.info(MODULE, `tokenA after swap: ${ourBalanceA.toString()} (added ${addedA || 're-read'})`);
+        logger.info(
+          MODULE,
+          `tokenA after swap: ${ourBalanceA.toString()} (added ${addedA || 're-read'})`,
+        );
       }
 
       // Swap for tokenB if we don't have enough
@@ -1047,7 +1255,8 @@ export class ByrealPositionExecutor {
 
         if (mintB.equals(NATIVE_MINT)) {
           // SOL deficit: only try USDC→SOL
-          if (mintBStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
+          if (mintBStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
         } else {
           // Try 1: swap USDC → tokenB (prefer external funding to preserve tokenA)
           if (mintBStr !== USDC) {
@@ -1059,7 +1268,13 @@ export class ByrealPositionExecutor {
             logger.info(MODULE, 'Trying tokenA → tokenB (last resort)');
             txSig = await swapForToken(this.connection, mintAStr, mintBStr, deficit.toString());
             if (!txSig) {
-              txSig = await swapViaByrealPool(this.chain, rawPoolInfo, mintA, mintB, deficit.toString());
+              txSig = await swapViaByrealPool(
+                this.chain,
+                rawPoolInfo,
+                mintA,
+                mintB,
+                deficit.toString(),
+              );
             }
           }
         }
@@ -1069,18 +1284,29 @@ export class ByrealPositionExecutor {
           notifySwapFailed(mintBStr, lastSwapError || 'all methods failed');
           return null;
         }
-        const addedB = await getActualSwapOutput(this.readConnection, txSig, mintBStr, userAddress.toBase58());
+        const addedB = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintBStr,
+          userAddress.toBase58(),
+        );
         if (addedB) {
           ourBalanceB = ourBalanceB.add(new BN(addedB));
         } else {
           logger.warn(MODULE, 'Could not parse swap TX, waiting 5s then re-reading balance');
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 5000));
           ourBalanceB = await this.getTokenBalance(userAddress, mintB);
         }
-        logger.info(MODULE, `tokenB after swap: ${ourBalanceB.toString()} (added ${addedB || 're-read'})`);
+        logger.info(
+          MODULE,
+          `tokenB after swap: ${ourBalanceB.toString()} (added ${addedB || 're-read'})`,
+        );
       }
 
-      logger.info(MODULE, `Our balances after swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`);
+      logger.info(
+        MODULE,
+        `Our balances after swap: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`,
+      );
 
       if (ourBalanceA.isZero() && ourBalanceB.isZero()) {
         logger.error(MODULE, 'No token balance for either side after swaps, cannot open position');
@@ -1091,11 +1317,17 @@ export class ByrealPositionExecutor {
       const MAX_OPEN_ATTEMPTS = 2;
       for (let openAttempt = 0; openAttempt < MAX_OPEN_ATTEMPTS; openAttempt++) {
         if (openAttempt > 0) {
-          logger.info(MODULE, `Retrying open position (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying open position (attempt ${openAttempt + 1}/${MAX_OPEN_ATTEMPTS}), re-reading balances...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
           ourBalanceA = await this.getTokenBalance(userAddress, mintA);
           ourBalanceB = await this.getTokenBalance(userAddress, mintB);
-          logger.info(MODULE, `Retry balances: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`);
+          logger.info(
+            MODULE,
+            `Retry balances: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`,
+          );
         }
 
         // Determine base token: use target's deposit amounts (scaled by ratio)
@@ -1121,48 +1353,62 @@ export class ByrealPositionExecutor {
 
         try {
           // 4. Build instructions using SDK
-          const { instructions, signers, nftAddress } = await this.chain.createPositionInstructions({
-            userAddress,
-            poolInfo: rawPoolInfo,
-            tickLower,
-            tickUpper,
-            base,
-            baseAmount,
-            otherAmountMax,
-          });
+          const { instructions, signers, nftAddress } = await this.chain.createPositionInstructions(
+            {
+              userAddress,
+              poolInfo: rawPoolInfo,
+              tickLower,
+              tickUpper,
+              base,
+              baseAmount,
+              otherAmountMax,
+            },
+          );
 
           // Add Memo instruction for referer (copy tracking)
           if (refererPosition) {
-            const memoIx = createMemoInstruction(`referer_position=${refererPosition}`, [userAddress]);
+            const memoIx = createMemoInstruction(`referer_position=${refererPosition}`, [
+              userAddress,
+            ]);
             instructions.push(memoIx);
           }
 
           // 5. Build, sign and send TX (all in one retry so blockhash stays fresh)
-          const txSig = await this.retryOnTransient(
-            async () => {
-              const tx = await makeByrealZeroPriorityTransaction({
-                connection: this.connection,
-                payerPublicKey: userAddress,
-                instructions,
-                signers,
-              });
-              const signed = await signerCallback(tx);
-              return this.connection.sendTransaction(signed, {
-                skipPreflight: config.skipPreflight,
-              });
-            },
-            'buildSignSend',
-          );
+          const txSig = await this.retryOnTransient(async () => {
+            const tx = await makeByrealZeroPriorityTransaction({
+              connection: this.connection,
+              payerPublicKey: userAddress,
+              instructions,
+              signers,
+            });
+            const signed = await signerCallback(tx);
+            return this.connection.sendTransaction(signed, {
+              skipPreflight: config.skipPreflight,
+            });
+          }, 'buildSignSend');
 
           // 6. Save mapping IMMEDIATELY after send (before confirm)
           //    Prevents orphaned positions if confirm times out but TX actually landed
           if (nftAddress) {
-            this.positionMap.set(targetNftMint, nftAddress, poolLabel, targetWallet, tickLower, tickUpper);
+            this.positionMap.set(
+              targetNftMint,
+              nftAddress,
+              poolLabel,
+              targetWallet,
+              tickLower,
+              tickUpper,
+            );
             this.positionMap.setLockedSol(targetNftMint, this.rentPerPosition);
             // Store target's liquidity at open time for proportional decrease tracking
-            this.positionMap.setTargetLiquidity(targetNftMint, rawPositionInfo.liquidity.toString());
+            this.positionMap.setTargetLiquidity(
+              targetNftMint,
+              rawPositionInfo.liquidity.toString(),
+            );
             this.poolIdToMints.set(poolId, poolLabel); // Cache for token cooldown lookups
-            logger.info(MODULE, `Mapping saved: ${targetNftMint.slice(0, 8)} -> ${nftAddress.slice(0, 8)} (targetLiq=${rawPositionInfo.liquidity.toString()})`);
+            logger.info(
+              MODULE,
+              `Mapping saved: ${targetNftMint.slice(0, 8)} -> ${nftAddress.slice(0, 8)} (targetLiq=${rawPositionInfo.liquidity.toString()})`,
+            );
           }
 
           // Track referer to dedup future opens from other targets copying same provider
@@ -1173,28 +1419,40 @@ export class ByrealPositionExecutor {
           // Wait for confirmation (best-effort, mapping already saved)
           try {
             const latestBlockhash = await this.connection.getLatestBlockhash();
-            await this.connection.confirmTransaction({
-              signature: txSig,
-              ...latestBlockhash,
-            }, 'confirmed');
+            await this.connection.confirmTransaction(
+              {
+                signature: txSig,
+                ...latestBlockhash,
+              },
+              'confirmed',
+            );
             logger.info(MODULE, `Position opened and confirmed: ${txSig}`);
           } catch (confirmErr: any) {
-            logger.warn(MODULE, `TX sent but confirm failed (mapping saved): ${confirmErr.message}`, { txSig });
+            logger.warn(
+              MODULE,
+              `TX sent but confirm failed (mapping saved): ${confirmErr.message}`,
+              { txSig },
+            );
           }
 
           // Extract actual locked SOL from TX (non-blocking)
-          this.extractLockedSolFromTx(txSig).then(actual => {
-            if (actual !== null) {
-              this.positionMap.setLockedSol(targetNftMint, actual);
-              logger.info(MODULE, `Locked SOL updated from TX: ${actual.toFixed(6)} SOL`);
-            }
-          }).catch(() => {});
+          this.extractLockedSolFromTx(txSig)
+            .then((actual) => {
+              if (actual !== null) {
+                this.positionMap.setLockedSol(targetNftMint, actual);
+                logger.info(MODULE, `Locked SOL updated from TX: ${actual.toFixed(6)} SOL`);
+              }
+            })
+            .catch(() => {});
 
           return txSig;
         } catch (openErr: any) {
           const msg = openErr.message || '';
           if (openAttempt < MAX_OPEN_ATTEMPTS - 1 && this.isRetryableSimError(openErr)) {
-            logger.warn(MODULE, `Open attempt ${openAttempt + 1} failed (${msg.slice(0, 100)}), will retry...`);
+            logger.warn(
+              MODULE,
+              `Open attempt ${openAttempt + 1} failed (${msg.slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw openErr; // re-throw to outer catch
@@ -1215,7 +1473,11 @@ export class ByrealPositionExecutor {
     } finally {
       this.release();
       // Refresh cached SOL balance after every open attempt
-      this.getSolBalance().then(b => { this.cachedSolBalance = b; }).catch(() => {});
+      this.getSolBalance()
+        .then((b) => {
+          this.cachedSolBalance = b;
+        })
+        .catch(() => {});
     }
   }
 
@@ -1226,7 +1488,9 @@ export class ByrealPositionExecutor {
    * - If target decreased partially → proportional partial decrease (decreaseLiquidityInstructions)
    * - If target liquidity >= stored (or no stored data) → fee collection only
    */
-  async copyDecreaseLiquidity(targetNftMint: string): Promise<{ txSig: string; type: 'DECREASE' | 'COLLECT_FEE' } | null> {
+  async copyDecreaseLiquidity(
+    targetNftMint: string,
+  ): Promise<{ txSig: string; type: 'DECREASE' | 'COLLECT_FEE' } | null> {
     const myNftMint = this.positionMap.get(targetNftMint);
     if (!myNftMint) {
       logger.warn(MODULE, `No mapped position for target NFT: ${targetNftMint.slice(0, 8)}`);
@@ -1255,7 +1519,10 @@ export class ByrealPositionExecutor {
           const removedLiq = storedLiq.sub(targetCurrentLiq);
           const pctNumerator = removedLiq.mul(new BN(10000));
           const pctBps = pctNumerator.div(storedLiq).toNumber(); // basis points removed
-          logger.info(MODULE, `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`);
+          logger.info(
+            MODULE,
+            `Partial decrease detected: target ${storedLiq.toString()} -> ${targetCurrentLiq.toString()} (removed ${pctBps / 100}%)`,
+          );
 
           try {
             const myPosition = await this.retryGetPosition(new PublicKey(myNftMint));
@@ -1265,9 +1532,15 @@ export class ByrealPositionExecutor {
               const calcAmount = myLiq.mul(removedLiq).div(storedLiq);
               decreaseAmount = calcAmount;
               if (calcAmount.isZero()) {
-                logger.info(MODULE, `Proportional decrease rounds to zero, collecting fees instead`);
+                logger.info(
+                  MODULE,
+                  `Proportional decrease rounds to zero, collecting fees instead`,
+                );
               } else {
-                logger.info(MODULE, `Our decrease: ${calcAmount.toString()} of ${myLiq.toString()}`);
+                logger.info(
+                  MODULE,
+                  `Our decrease: ${calcAmount.toString()} of ${myLiq.toString()}`,
+                );
               }
             }
           } catch (err: any) {
@@ -1278,12 +1551,18 @@ export class ByrealPositionExecutor {
           this.positionMap.setTargetLiquidity(targetNftMint, targetCurrentLiq.toString());
         } else {
           // Target liquidity >= stored — likely fee collection only (increase happened?)
-          logger.info(MODULE, `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`);
+          logger.info(
+            MODULE,
+            `Target liquidity ${targetCurrentLiq.toString()} >= stored ${storedLiq.toString()}, collecting fees`,
+          );
           decreaseAmount = new BN(0);
         }
       } else {
         // No stored liquidity (legacy position) — can't calculate proportion, collect fees
-        logger.info(MODULE, `No stored targetLiquidity for ${targetNftMint.slice(0, 8)}, collecting fees (legacy position)`);
+        logger.info(
+          MODULE,
+          `No stored targetLiquidity for ${targetNftMint.slice(0, 8)}, collecting fees (legacy position)`,
+        );
         decreaseAmount = new BN(0);
       }
     }
@@ -1302,8 +1581,11 @@ export class ByrealPositionExecutor {
         const MAX_FEE_ATTEMPTS = 2;
         for (let attempt = 0; attempt < MAX_FEE_ATTEMPTS; attempt++) {
           if (attempt > 0) {
-            logger.info(MODULE, `Retrying collect fees (attempt ${attempt + 1}/${MAX_FEE_ATTEMPTS})...`);
-            await new Promise(r => setTimeout(r, 2000));
+            logger.info(
+              MODULE,
+              `Retrying collect fees (attempt ${attempt + 1}/${MAX_FEE_ATTEMPTS})...`,
+            );
+            await new Promise((r) => setTimeout(r, 2000));
           }
 
           try {
@@ -1315,7 +1597,9 @@ export class ByrealPositionExecutor {
                 });
                 const tx = await this.makeSdkTransactionWithoutPriorityFee(result);
                 const signed = await signerCallback(tx);
-                return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+                return this.connection.sendTransaction(signed, {
+                  skipPreflight: config.skipPreflight,
+                });
               },
               `collectFees(${myNftMint.slice(0, 8)})`,
             );
@@ -1324,7 +1608,10 @@ export class ByrealPositionExecutor {
             return { txSig, type: 'COLLECT_FEE' };
           } catch (feeErr: any) {
             if (attempt < MAX_FEE_ATTEMPTS - 1 && this.isRetryableSimError(feeErr)) {
-              logger.warn(MODULE, `Collect fees attempt ${attempt + 1} failed (${(feeErr.message || '').slice(0, 100)}), will retry...`);
+              logger.warn(
+                MODULE,
+                `Collect fees attempt ${attempt + 1} failed (${(feeErr.message || '').slice(0, 100)}), will retry...`,
+              );
               continue;
             }
             throw feeErr;
@@ -1342,10 +1629,15 @@ export class ByrealPositionExecutor {
 
     // Decrease liquidity (full or partial)
     const isPartial = decreaseAmount !== null;
-    logger.info(MODULE, `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myNftMint.slice(0, 8)}...`);
+    logger.info(
+      MODULE,
+      `${isPartial ? 'Partial' : 'Full'} decrease for our NFT: ${myNftMint.slice(0, 8)}...`,
+    );
 
     if (config.dryRun) {
-      logger.info(MODULE, `[DRY RUN] Would ${isPartial ? 'partial' : 'full'} decrease liquidity`, { myNftMint });
+      logger.info(MODULE, `[DRY RUN] Would ${isPartial ? 'partial' : 'full'} decrease liquidity`, {
+        myNftMint,
+      });
       return { txSig: 'dry-run-decrease', type: 'DECREASE' };
     }
 
@@ -1355,8 +1647,11 @@ export class ByrealPositionExecutor {
       const MAX_DECREASE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_DECREASE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Retrying decrease (attempt ${attempt + 1}/${MAX_DECREASE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying decrease (attempt ${attempt + 1}/${MAX_DECREASE_ATTEMPTS})...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -1380,7 +1675,9 @@ export class ByrealPositionExecutor {
                 });
                 const tx = await this.makeSdkTransactionWithoutPriorityFee(result);
                 const signed = await signerCallback(tx);
-                return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+                return this.connection.sendTransaction(signed, {
+                  skipPreflight: config.skipPreflight,
+                });
               },
               `decreaseLiquidity-partial(${myNftMint.slice(0, 8)})`,
             );
@@ -1395,29 +1692,43 @@ export class ByrealPositionExecutor {
                 });
                 const tx = await this.makeSdkTransactionWithoutPriorityFee(result);
                 const signed = await signerCallback(tx);
-                return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+                return this.connection.sendTransaction(signed, {
+                  skipPreflight: config.skipPreflight,
+                });
               },
               `decreaseLiquidity-full(${myNftMint.slice(0, 8)})`,
             );
           }
 
-          logger.info(MODULE, `Liquidity decreased${isPartial ? ' (partial)' : ''} (position kept open): ${txSig}`);
+          logger.info(
+            MODULE,
+            `Liquidity decreased${isPartial ? ' (partial)' : ''} (position kept open): ${txSig}`,
+          );
 
           // Queue received tokens as pending swaps
           try {
             const received = await this.parseTxTokenChanges(txSig, getUserAddress());
             for (const { mint, amount } of received) {
-              logger.info(MODULE, `Received from decrease: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`);
+              logger.info(
+                MODULE,
+                `Received from decrease: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`,
+              );
               this.addPendingSwap(mint, amount);
             }
           } catch (parseErr: any) {
-            logger.warn(MODULE, `Could not parse decrease TX for pending swaps: ${parseErr.message}`);
+            logger.warn(
+              MODULE,
+              `Could not parse decrease TX for pending swaps: ${parseErr.message}`,
+            );
           }
 
           return { txSig, type: 'DECREASE' };
         } catch (decErr: any) {
           if (attempt < MAX_DECREASE_ATTEMPTS - 1 && this.isRetryableSimError(decErr)) {
-            logger.warn(MODULE, `Decrease attempt ${attempt + 1} failed (${(decErr.message || '').slice(0, 100)}), will retry...`);
+            logger.warn(
+              MODULE,
+              `Decrease attempt ${attempt + 1} failed (${(decErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw decErr;
@@ -1437,7 +1748,10 @@ export class ByrealPositionExecutor {
    * Copy an IncreaseLiquidity from target.
    * Read target's position to see current state, add liquidity proportionally using our balance.
    */
-  async copyIncreaseLiquidity(targetNftMint: string, targetWallet?: string): Promise<string | null> {
+  async copyIncreaseLiquidity(
+    targetNftMint: string,
+    targetWallet?: string,
+  ): Promise<string | null> {
     const myNftMint = this.positionMap.get(targetNftMint);
     if (!myNftMint) {
       logger.warn(MODULE, `No mapped position for target NFT: ${targetNftMint.slice(0, 8)}`);
@@ -1470,22 +1784,34 @@ export class ByrealPositionExecutor {
 
       // Pump token filter (same tri-state as copyOpenPosition)
       if (config.pumpFilterMode !== 'off') {
-        const pumpMint = mintAStr.toLowerCase().includes('pump') ? mintAStr
-          : mintBStr.toLowerCase().includes('pump') ? mintBStr : null;
+        const pumpMint = mintAStr.toLowerCase().includes('pump')
+          ? mintAStr
+          : mintBStr.toLowerCase().includes('pump')
+            ? mintBStr
+            : null;
         if (pumpMint && !isPumpApproved(pumpMint)) {
-          logger.info(MODULE, `[INCREASE] Skipped — pump token ${config.pumpFilterMode === 'full' ? 'filtered' : 'not approved'} (${pumpMint})`);
+          logger.info(
+            MODULE,
+            `[INCREASE] Skipped — pump token ${config.pumpFilterMode === 'full' ? 'filtered' : 'not approved'} (${pumpMint})`,
+          );
           return null;
         }
       }
 
       // Pool age filter (same as copyOpenPosition)
-      if (config.minPoolAgeDays > 0 && !isPoolAgeWhitelisted(mintAStr, mintBStr, config.poolAgeWhitelist)) {
+      if (
+        config.minPoolAgeDays > 0 &&
+        !isPoolAgeWhitelisted(mintAStr, mintBStr, config.poolAgeWhitelist)
+      ) {
         const poolEntry = getPoolInfo(mintAStr);
         if (poolEntry && poolEntry.openTime > 0) {
           const ageSeconds = Math.floor(Date.now() / 1000) - poolEntry.openTime;
           if (ageSeconds < config.minPoolAgeDays * 86400) {
             const ageDays = (ageSeconds / 86400).toFixed(1);
-            logger.info(MODULE, `[INCREASE] Skipped — pool too new (${ageDays}d < ${config.minPoolAgeDays}d) for ${mintAStr.slice(0, 8)}`);
+            logger.info(
+              MODULE,
+              `[INCREASE] Skipped — pool too new (${ageDays}d < ${config.minPoolAgeDays}d) for ${mintAStr.slice(0, 8)}`,
+            );
             return null;
           }
         }
@@ -1493,12 +1819,18 @@ export class ByrealPositionExecutor {
 
       // Pool TVL filter (same as copyOpenPosition)
       if (config.minPoolTvl > 0) {
-        for (const [mint, label] of [[mintAStr, 'mintA'], [mintBStr, 'mintB']] as [string, string][]) {
+        for (const [mint, label] of [
+          [mintAStr, 'mintA'],
+          [mintBStr, 'mintB'],
+        ] as [string, string][]) {
           if (config.poolTvlWhitelist.has(mint)) continue;
           if (STABLE_MINTS.has(mint)) continue;
           const tvl = await checkTokenLiquidity(mint);
           if (tvl === null || tvl < config.minPoolTvl) {
-            logger.info(MODULE, `[INCREASE] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`);
+            logger.info(
+              MODULE,
+              `[INCREASE] Skipped — ${label} ${mint.slice(0, 8)} TVL $${tvl !== null ? tvl.toFixed(0) : '?'} < $${config.minPoolTvl} (${config.tvlSource})`,
+            );
             return null;
           }
         }
@@ -1506,8 +1838,11 @@ export class ByrealPositionExecutor {
 
       // Concentration filter (same as copyOpenPosition)
       const concSkipInc = this.checkConcentrationLimit(
-        mintAStr, mintBStr, targetWallet,
-        targetPosition.tokenA.uiAmount, targetPosition.tokenB.uiAmount,
+        mintAStr,
+        mintBStr,
+        targetWallet,
+        targetPosition.tokenA.uiAmount,
+        targetPosition.tokenB.uiAmount,
         targetPosition.rawPoolInfo,
         'INCREASE',
       );
@@ -1536,7 +1871,10 @@ export class ByrealPositionExecutor {
         return null;
       }
 
-      logger.info(MODULE, `Increase delta: A=${targetA.toString()}, B=${targetB.toString()} (full target: A=${fullTargetA.toString()}, B=${fullTargetB.toString()}, our pos: A=${myAmountA.toString()}, B=${myAmountB.toString()})`);
+      logger.info(
+        MODULE,
+        `Increase delta: A=${targetA.toString()}, B=${targetB.toString()} (full target: A=${fullTargetA.toString()}, B=${fullTargetB.toString()}, our pos: A=${myAmountA.toString()}, B=${myAmountB.toString()})`,
+      );
 
       // Read our available token balances — swap if insufficient
       let ourBalanceA = await this.getTokenBalance(userAddress, mintA);
@@ -1549,12 +1887,19 @@ export class ByrealPositionExecutor {
         let txSig: string | null = null;
 
         if (mintA.equals(NATIVE_MINT)) {
-          if (mintAStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
+          if (mintAStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintAStr, deficit.toString());
         } else {
           if (!ourBalanceB.isZero()) {
             txSig = await swapForToken(this.connection, mintBStr, mintAStr, deficit.toString());
             if (!txSig) {
-              txSig = await swapViaByrealPool(this.chain, rawPoolInfo, mintB, mintA, deficit.toString());
+              txSig = await swapViaByrealPool(
+                this.chain,
+                rawPoolInfo,
+                mintB,
+                mintA,
+                deficit.toString(),
+              );
             }
           }
 
@@ -1568,15 +1913,26 @@ export class ByrealPositionExecutor {
           logger.error(MODULE, 'IncreaseLiq: all swap methods failed for tokenA, aborting');
           return null;
         }
-        const addedA = await getActualSwapOutput(this.readConnection, txSig, mintAStr, userAddress.toBase58());
+        const addedA = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintAStr,
+          userAddress.toBase58(),
+        );
         if (addedA) {
           ourBalanceA = ourBalanceA.add(new BN(addedA));
         } else {
-          logger.warn(MODULE, 'IncreaseLiq: could not parse swap TX, waiting 5s then re-reading balance');
-          await new Promise(r => setTimeout(r, 5000));
+          logger.warn(
+            MODULE,
+            'IncreaseLiq: could not parse swap TX, waiting 5s then re-reading balance',
+          );
+          await new Promise((r) => setTimeout(r, 5000));
           ourBalanceA = await this.getTokenBalance(userAddress, mintA);
         }
-        logger.info(MODULE, `IncreaseLiq: tokenA after swap: ${ourBalanceA.toString()} (added ${addedA || 're-read'})`);
+        logger.info(
+          MODULE,
+          `IncreaseLiq: tokenA after swap: ${ourBalanceA.toString()} (added ${addedA || 're-read'})`,
+        );
       }
 
       // Swap for tokenB if we don't have enough
@@ -1586,7 +1942,8 @@ export class ByrealPositionExecutor {
         let txSig: string | null = null;
 
         if (mintB.equals(NATIVE_MINT)) {
-          if (mintBStr !== USDC) txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
+          if (mintBStr !== USDC)
+            txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
         } else {
           if (mintBStr !== USDC) {
             txSig = await swapForToken(this.connection, USDC, mintBStr, deficit.toString());
@@ -1596,7 +1953,13 @@ export class ByrealPositionExecutor {
             logger.info(MODULE, 'IncreaseLiq: trying tokenA → tokenB (last resort)');
             txSig = await swapForToken(this.connection, mintAStr, mintBStr, deficit.toString());
             if (!txSig) {
-              txSig = await swapViaByrealPool(this.chain, rawPoolInfo, mintA, mintB, deficit.toString());
+              txSig = await swapViaByrealPool(
+                this.chain,
+                rawPoolInfo,
+                mintA,
+                mintB,
+                deficit.toString(),
+              );
             }
           }
         }
@@ -1605,19 +1968,33 @@ export class ByrealPositionExecutor {
           logger.error(MODULE, 'IncreaseLiq: all swap methods failed for tokenB, aborting');
           return null;
         }
-        const addedB = await getActualSwapOutput(this.readConnection, txSig, mintBStr, userAddress.toBase58());
+        const addedB = await getActualSwapOutput(
+          this.readConnection,
+          txSig,
+          mintBStr,
+          userAddress.toBase58(),
+        );
         if (addedB) {
           ourBalanceB = ourBalanceB.add(new BN(addedB));
         } else {
-          logger.warn(MODULE, 'IncreaseLiq: could not parse swap TX, waiting 5s then re-reading balance');
-          await new Promise(r => setTimeout(r, 5000));
+          logger.warn(
+            MODULE,
+            'IncreaseLiq: could not parse swap TX, waiting 5s then re-reading balance',
+          );
+          await new Promise((r) => setTimeout(r, 5000));
           ourBalanceB = await this.getTokenBalance(userAddress, mintB);
         }
-        logger.info(MODULE, `IncreaseLiq: tokenB after swap: ${ourBalanceB.toString()} (added ${addedB || 're-read'})`);
+        logger.info(
+          MODULE,
+          `IncreaseLiq: tokenB after swap: ${ourBalanceB.toString()} (added ${addedB || 're-read'})`,
+        );
       }
 
       if (ourBalanceA.isZero() && ourBalanceB.isZero()) {
-        logger.warn(MODULE, 'No token balance for either side after swaps, cannot increase liquidity');
+        logger.warn(
+          MODULE,
+          'No token balance for either side after swaps, cannot increase liquidity',
+        );
         return null;
       }
 
@@ -1625,11 +2002,17 @@ export class ByrealPositionExecutor {
       const MAX_INCREASE_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_INCREASE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
-          logger.info(MODULE, `Retrying increase (attempt ${attempt + 1}/${MAX_INCREASE_ATTEMPTS}), re-reading balances...`);
-          await new Promise(r => setTimeout(r, 2000));
+          logger.info(
+            MODULE,
+            `Retrying increase (attempt ${attempt + 1}/${MAX_INCREASE_ATTEMPTS}), re-reading balances...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
           ourBalanceA = await this.getTokenBalance(userAddress, mintA);
           ourBalanceB = await this.getTokenBalance(userAddress, mintB);
-          logger.info(MODULE, `Retry balances: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`);
+          logger.info(
+            MODULE,
+            `Retry balances: A=${ourBalanceA.toString()}, B=${ourBalanceB.toString()}`,
+          );
         }
 
         let base: 'MintA' | 'MintB';
@@ -1665,7 +2048,9 @@ export class ByrealPositionExecutor {
                 signers: result.signers ?? [],
               });
               const signed = await signerCallback(tx);
-              return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+              return this.connection.sendTransaction(signed, {
+                skipPreflight: config.skipPreflight,
+              });
             },
             `addLiquidity(${myNftMint.slice(0, 8)})`,
           );
@@ -1676,8 +2061,14 @@ export class ByrealPositionExecutor {
           try {
             const updatedTarget = await this.retryGetPosition(new PublicKey(targetNftMint));
             if (updatedTarget) {
-              this.positionMap.setTargetLiquidity(targetNftMint, updatedTarget.rawPositionInfo.liquidity.toString());
-              logger.info(MODULE, `Updated targetLiquidity after increase: ${updatedTarget.rawPositionInfo.liquidity.toString()}`);
+              this.positionMap.setTargetLiquidity(
+                targetNftMint,
+                updatedTarget.rawPositionInfo.liquidity.toString(),
+              );
+              logger.info(
+                MODULE,
+                `Updated targetLiquidity after increase: ${updatedTarget.rawPositionInfo.liquidity.toString()}`,
+              );
             }
           } catch {
             logger.warn(MODULE, `Could not update targetLiquidity after increase`);
@@ -1686,7 +2077,10 @@ export class ByrealPositionExecutor {
           return txSig;
         } catch (incErr: any) {
           if (attempt < MAX_INCREASE_ATTEMPTS - 1 && this.isRetryableSimError(incErr)) {
-            logger.warn(MODULE, `Increase attempt ${attempt + 1} failed (${(incErr.message || '').slice(0, 100)}), will retry...`);
+            logger.warn(
+              MODULE,
+              `Increase attempt ${attempt + 1} failed (${(incErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw incErr;
@@ -1740,7 +2134,7 @@ export class ByrealPositionExecutor {
       for (let attempt = 0; attempt < MAX_CLOSE_ATTEMPTS; attempt++) {
         if (attempt > 0) {
           logger.info(MODULE, `Retrying close (attempt ${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`);
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 2000));
         }
 
         try {
@@ -1753,13 +2147,21 @@ export class ByrealPositionExecutor {
               });
               const tx = await this.makeSdkTransactionWithoutPriorityFee(result);
               const signed = await signerCallback(tx);
-              return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+              return this.connection.sendTransaction(signed, {
+                skipPreflight: config.skipPreflight,
+              });
             },
             `closePosition(${myNftMint.slice(0, 8)})`,
           );
         } catch (closeErr: any) {
-          if (attempt < MAX_CLOSE_ATTEMPTS - 1 && (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))) {
-            logger.warn(MODULE, `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`);
+          if (
+            attempt < MAX_CLOSE_ATTEMPTS - 1 &&
+            (this.isRetryableSimError(closeErr) || this.isTransientError(closeErr))
+          ) {
+            logger.warn(
+              MODULE,
+              `Close attempt ${attempt + 1} failed (${(closeErr.message || '').slice(0, 100)}), will retry...`,
+            );
             continue;
           }
           throw closeErr;
@@ -1773,11 +2175,17 @@ export class ByrealPositionExecutor {
 
         // On-chain failure — retry if attempts remain
         if (attempt < MAX_CLOSE_ATTEMPTS - 1) {
-          logger.warn(MODULE, `Close TX failed on-chain: ${txSig.slice(0, 8)}, retrying (${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`);
+          logger.warn(
+            MODULE,
+            `Close TX failed on-chain: ${txSig.slice(0, 8)}, retrying (${attempt + 1}/${MAX_CLOSE_ATTEMPTS})...`,
+          );
           txSig = null;
           continue;
         }
-        logger.error(MODULE, `Close TX failed on-chain after ${MAX_CLOSE_ATTEMPTS} attempts: ${txSig.slice(0, 8)}, keeping mapping`);
+        logger.error(
+          MODULE,
+          `Close TX failed on-chain after ${MAX_CLOSE_ATTEMPTS} attempts: ${txSig.slice(0, 8)}, keeping mapping`,
+        );
         notifyCloseFailed(myNftMint, 'on-chain failure after max attempts', MAX_CLOSE_ATTEMPTS);
         return null;
       }
@@ -1791,13 +2199,19 @@ export class ByrealPositionExecutor {
       // 3. Parse TX to get actual received amounts (liquidity + fees)
       const received = await this.parseTxTokenChanges(txSig, userAddress);
       for (const { mint, amount } of received) {
-        logger.info(MODULE, `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`);
+        logger.info(
+          MODULE,
+          `Received from close: ${mint.toBase58().slice(0, 8)}... = ${amount.toString()}`,
+        );
         this.addPendingSwap(mint, amount);
       }
 
       return txSig;
     } catch (err: any) {
-      logger.error(MODULE, `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`);
+      logger.error(
+        MODULE,
+        `Close position failed: ${typeof err?.message === 'string' ? err.message : JSON.stringify(err)}`,
+      );
       notifyCloseFailed(myNftMint, err, 0);
       return null;
     } finally {
@@ -1815,7 +2229,13 @@ export class ByrealPositionExecutor {
     const USDT_T22 = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
     const mintStr = mint.toBase58();
 
-    if (mintStr === USDC_MINT || mintStr === USDT_MINT || mintStr === USDT_T22 || mint.equals(NATIVE_MINT)) return;
+    if (
+      mintStr === USDC_MINT ||
+      mintStr === USDT_MINT ||
+      mintStr === USDT_T22 ||
+      mint.equals(NATIVE_MINT)
+    )
+      return;
     if (amount.lte(new BN(0))) return;
 
     const data = this.readPendingFile();
@@ -1824,7 +2244,10 @@ export class ByrealPositionExecutor {
     const total = existing.add(amount);
     data[mintStr] = { ...entry, pending: total.toString() };
     this.writePendingFile(data);
-    logger.info(MODULE, `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`);
+    logger.info(
+      MODULE,
+      `Pending swap queued: ${mintStr.slice(0, 8)}... amount=${amount.toString()} (total=${total.toString()})`,
+    );
   }
 
   /**
@@ -1837,7 +2260,13 @@ export class ByrealPositionExecutor {
       const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
       const USDT_MINT = 'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5';
       const USDT_T22 = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
-      if (mint === USDC_MINT || mint === USDT_MINT || mint === USDT_T22 || mint === NATIVE_MINT.toBase58()) continue;
+      if (
+        mint === USDC_MINT ||
+        mint === USDT_MINT ||
+        mint === USDT_T22 ||
+        mint === NATIVE_MINT.toBase58()
+      )
+        continue;
 
       const bn = new BN(amount);
       if (bn.lte(new BN(0))) continue;
@@ -1846,7 +2275,10 @@ export class ByrealPositionExecutor {
       const existing = new BN(entry.botReceived || '0');
       const total = existing.add(bn);
       data[mint] = { ...entry, botReceived: total.toString() };
-      logger.info(MODULE, `Bot close received: ${mint.slice(0, 8)}... amount=${bn.toString()} (total=${total.toString()})`);
+      logger.info(
+        MODULE,
+        `Bot close received: ${mint.slice(0, 8)}... amount=${bn.toString()} (total=${total.toString()})`,
+      );
     }
     this.writePendingFile(data);
   }
@@ -1880,22 +2312,37 @@ export class ByrealPositionExecutor {
       // Use BN math: (pendingAmount * botSwap) / botReceived
       swapAmount = pendingAmount.mul(botSwap).div(botReceived);
       const pct = botSwap.muln(10000).div(botReceived).toNumber() / 100;
-      logger.info(MODULE, `Swap ratio: bot swapped ${botSwap.toString()} / received ${botReceived.toString()} = ${pct.toFixed(1)}%`);
-      logger.info(MODULE, `Our swap: ${pendingAmount.toString()} × ${pct.toFixed(1)}% = ${swapAmount.toString()}`);
+      logger.info(
+        MODULE,
+        `Swap ratio: bot swapped ${botSwap.toString()} / received ${botReceived.toString()} = ${pct.toFixed(1)}%`,
+      );
+      logger.info(
+        MODULE,
+        `Our swap: ${pendingAmount.toString()} × ${pct.toFixed(1)}% = ${swapAmount.toString()}`,
+      );
     } else {
       // Fallback: no bot received data, use actual wallet balance
       swapAmount = await this.getTokenBalance(getUserAddress(), new PublicKey(inputMint));
-      logger.warn(MODULE, `No bot close data for ${inputMint.slice(0, 8)}, using actual balance: ${swapAmount.toString()}`);
+      logger.warn(
+        MODULE,
+        `No bot close data for ${inputMint.slice(0, 8)}, using actual balance: ${swapAmount.toString()}`,
+      );
     }
 
     if (swapAmount.lte(new BN(1000))) {
-      logger.info(MODULE, `Swap amount too small for ${inputMint.slice(0, 8)} (${swapAmount.toString()}), skipping`);
+      logger.info(
+        MODULE,
+        `Swap amount too small for ${inputMint.slice(0, 8)} (${swapAmount.toString()}), skipping`,
+      );
       this.clearPending(inputMint);
       return null;
     }
 
     if (config.dryRun) {
-      logger.info(MODULE, '[DRY RUN] Would swap to USDC', { inputMint, amount: swapAmount.toString() });
+      logger.info(MODULE, '[DRY RUN] Would swap to USDC', {
+        inputMint,
+        amount: swapAmount.toString(),
+      });
       this.subtractPending(inputMint, swapAmount, botSwap);
       return 'dry-run-pending-swap';
     }
@@ -1904,7 +2351,12 @@ export class ByrealPositionExecutor {
 
     try {
       const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-      const sig = await jupSwapExactIn(this.connection, inputMint, USDC_MINT, swapAmount.toString());
+      const sig = await jupSwapExactIn(
+        this.connection,
+        inputMint,
+        USDC_MINT,
+        swapAmount.toString(),
+      );
       if (!sig) return null;
 
       logger.info(MODULE, `Pending swap done: ${inputMint.slice(0, 8)}... -> USDC: ${sig}`);
@@ -1935,7 +2387,10 @@ export class ByrealPositionExecutor {
       const botReceived = entry.botReceived ? new BN(entry.botReceived) : new BN(0);
       const botRemaining = botReceived.sub(botSwapped);
       entry.botReceived = botRemaining.lte(new BN(0)) ? '0' : botRemaining.toString();
-      logger.info(MODULE, `Pending remaining: ${inputMint.slice(0, 8)}... = ${remaining.toString()}`);
+      logger.info(
+        MODULE,
+        `Pending remaining: ${inputMint.slice(0, 8)}... = ${remaining.toString()}`,
+      );
     }
     this.writePendingFile(data);
   }
@@ -1996,7 +2451,9 @@ export class ByrealPositionExecutor {
   }
 
   /** Get all persisted token PnL data (public for dashboard). */
-  getTokenPnlData(): Record<string, any> { return this.readPnlFile(); }
+  getTokenPnlData(): Record<string, any> {
+    return this.readPnlFile();
+  }
 
   // --- Referer dedup file (persisted across restarts) ---
 
@@ -2021,7 +2478,12 @@ export class ByrealPositionExecutor {
     }
   }
 
-  private addReferer(refererPosition: string, targetNft: string, ourNft: string, targetWallet: string): void {
+  private addReferer(
+    refererPosition: string,
+    targetNft: string,
+    ourNft: string,
+    targetWallet: string,
+  ): void {
     const data = this.readRefererFile();
     data[refererPosition] = { targetNft, ourNft, targetWallet, openedAt: Date.now() };
     this.writeRefererFile(data);
@@ -2045,7 +2507,9 @@ export class ByrealPositionExecutor {
       const raw = fs.readFileSync('./data/token-names.json', 'utf-8');
       const cache = JSON.parse(raw);
       return cache[mint]?.symbol || mint;
-    } catch { return mint; }
+    } catch {
+      return mint;
+    }
   }
 
   /** Log pending swap status and clean up zero-amount entries. */
@@ -2064,7 +2528,10 @@ export class ByrealPositionExecutor {
       try {
         const balance = await this.getTokenBalance(getUserAddress(), new PublicKey(mint));
         if (balance.lte(new BN(1000))) {
-          logger.info(MODULE, `Pending ${this.getTokenSymbol(mint)} balance is dust, clearing (externally swapped?)`);
+          logger.info(
+            MODULE,
+            `Pending ${this.getTokenSymbol(mint)} balance is dust, clearing (externally swapped?)`,
+          );
           delete data[mint];
           cleaned = true;
           continue;
@@ -2074,9 +2541,14 @@ export class ByrealPositionExecutor {
           e.pending = balance.toString();
           cleaned = true;
         }
-      } catch { /* ignore RPC errors */ }
+      } catch {
+        /* ignore RPC errors */
+      }
       const ageMin = e.createdAt ? Math.floor((Date.now() - e.createdAt) / 60000) : 0;
-      logger.debug(MODULE, `Pending: ${this.getTokenSymbol(mint)} amount=${e.pending} (${ageMin}min)`);
+      logger.debug(
+        MODULE,
+        `Pending: ${this.getTokenSymbol(mint)} amount=${e.pending} (${ageMin}min)`,
+      );
     }
     if (cleaned) this.writePendingFile(data);
   }
@@ -2103,10 +2575,16 @@ export class ByrealPositionExecutor {
       } catch (err: any) {
         // Distinguish transient RPC errors from "account doesn't exist"
         if (this.isTransientError(err)) {
-          logger.debug(MODULE, `Reconcile: RPC transient error for ${tgtNft.slice(0, 8)}, skipping`);
+          logger.debug(
+            MODULE,
+            `Reconcile: RPC transient error for ${tgtNft.slice(0, 8)}, skipping`,
+          );
         } else {
           // Non-transient error (account not found, parse error, etc.) = position is gone
-          logger.info(MODULE, `Reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), treating as orphan`);
+          logger.info(
+            MODULE,
+            `Reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), treating as orphan`,
+          );
           isOrphan = true;
         }
       }
@@ -2116,38 +2594,56 @@ export class ByrealPositionExecutor {
         try {
           const isOrca = await this.isOrcaPositionChecker(tgtNft);
           if (isOrca) {
-            logger.info(MODULE, `Reconcile: ${tgtNft.slice(0, 8)} is Orca position, backfilling dex='orca' and skipping`);
+            logger.info(
+              MODULE,
+              `Reconcile: ${tgtNft.slice(0, 8)} is Orca position, backfilling dex='orca' and skipping`,
+            );
             this.positionMap.setDex(tgtNft, 'orca');
             isOrphan = false;
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
       // Also check if it's a Meteora position
       if (isOrphan && this.isMeteoraPositionChecker) {
         try {
           const isMeteora = await this.isMeteoraPositionChecker(tgtNft);
           if (isMeteora) {
-            logger.info(MODULE, `Reconcile: ${tgtNft.slice(0, 8)} is Meteora position, backfilling dex='meteora' and skipping`);
+            logger.info(
+              MODULE,
+              `Reconcile: ${tgtNft.slice(0, 8)} is Meteora position, backfilling dex='meteora' and skipping`,
+            );
             this.positionMap.setDex(tgtNft, 'meteora');
             isOrphan = false;
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
       // Also check if it's a PancakeSwap position
       if (isOrphan && this.isPcsPositionChecker) {
         try {
           const isPcs = await this.isPcsPositionChecker(tgtNft);
           if (isPcs) {
-            logger.info(MODULE, `Reconcile: ${tgtNft.slice(0, 8)} is PCS position, backfilling dex='pancakeswap' and skipping`);
+            logger.info(
+              MODULE,
+              `Reconcile: ${tgtNft.slice(0, 8)} is PCS position, backfilling dex='pancakeswap' and skipping`,
+            );
             this.positionMap.setDex(tgtNft, 'pancakeswap');
             isOrphan = false;
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
 
       if (isOrphan) {
         orphans++;
-        logger.warn(MODULE, `Orphan detected: target NFT ${tgtNft.slice(0, 8)} gone, our NFT ${ourNft.slice(0, 8)} still mapped`);
+        logger.warn(
+          MODULE,
+          `Orphan detected: target NFT ${tgtNft.slice(0, 8)} gone, our NFT ${ourNft.slice(0, 8)} still mapped`,
+        );
 
         if (config.dryRun) {
           logger.info(MODULE, `[DRY RUN] Would close orphan: ${ourNft.slice(0, 8)}`);
@@ -2165,13 +2661,18 @@ export class ByrealPositionExecutor {
               });
               const tx = await this.makeSdkTransactionWithoutPriorityFee(result);
               const signed = await signerCallback(tx);
-              return this.connection.sendTransaction(signed, { skipPreflight: config.skipPreflight });
+              return this.connection.sendTransaction(signed, {
+                skipPreflight: config.skipPreflight,
+              });
             },
             `orphanClose(${ourNft.slice(0, 8)})`,
           );
           const orphanOk = await this.verifyTxSuccess(orphanTx);
           if (!orphanOk) {
-            logger.error(MODULE, `Orphan close TX failed on-chain: ${ourNft.slice(0, 8)}, keeping mapping`);
+            logger.error(
+              MODULE,
+              `Orphan close TX failed on-chain: ${ourNft.slice(0, 8)}, keeping mapping`,
+            );
             continue;
           }
           this.positionMap.delete(tgtNft);
@@ -2193,7 +2694,7 @@ export class ByrealPositionExecutor {
       }
 
       // Rate limit: don't spam RPC
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     if (orphans === 0) {
@@ -2212,7 +2713,7 @@ export class ByrealPositionExecutor {
     (async () => {
       logger.info(MODULE, `Reconciling ${this.positionMap.size()} position mappings...`);
       const orphans: { tgtNft: string; ourNft: string }[] = [];
-      const waitRateLimit = () => new Promise(r => setTimeout(r, 500));
+      const waitRateLimit = () => new Promise((r) => setTimeout(r, 500));
 
       for (const [tgtNft, ourNft] of this.positionMap.entries()) {
         // Skip non-Byreal positions — other DEX SDKs handle their own reconciliation
@@ -2225,14 +2726,23 @@ export class ByrealPositionExecutor {
           isOrphan = classifyByrealReconcileTarget(targetPosition).isOrphan;
         } catch (err: any) {
           if (this.isTransientError(err)) {
-            logger.debug(MODULE, `Reconcile: RPC transient error for ${tgtNft.slice(0, 8)}, skipping`);
+            logger.debug(
+              MODULE,
+              `Reconcile: RPC transient error for ${tgtNft.slice(0, 8)}, skipping`,
+            );
             await waitRateLimit();
             continue;
           } else if (isPositionGoneError(err)) {
-            logger.info(MODULE, `Reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), treating as orphan`);
+            logger.info(
+              MODULE,
+              `Reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), treating as orphan`,
+            );
             isOrphan = true;
           } else {
-            logger.warn(MODULE, `Reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), keeping mapping`);
+            logger.warn(
+              MODULE,
+              `Reconcile: target ${tgtNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), keeping mapping`,
+            );
             await waitRateLimit();
             continue;
           }
@@ -2242,33 +2752,48 @@ export class ByrealPositionExecutor {
           try {
             const isOrca = await this.isOrcaPositionChecker(tgtNft);
             if (isOrca) {
-              logger.info(MODULE, `Reconcile: ${tgtNft.slice(0, 8)} is Orca position, backfilling dex='orca' and skipping`);
+              logger.info(
+                MODULE,
+                `Reconcile: ${tgtNft.slice(0, 8)} is Orca position, backfilling dex='orca' and skipping`,
+              );
               this.positionMap.setDex(tgtNft, 'orca');
               isOrphan = false;
             }
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
         // Also check if it's a Meteora position
         if (isOrphan && this.isMeteoraPositionChecker) {
           try {
             const isMeteora = await this.isMeteoraPositionChecker(tgtNft);
             if (isMeteora) {
-              logger.info(MODULE, `Reconcile: ${tgtNft.slice(0, 8)} is Meteora position, backfilling dex='meteora' and skipping`);
+              logger.info(
+                MODULE,
+                `Reconcile: ${tgtNft.slice(0, 8)} is Meteora position, backfilling dex='meteora' and skipping`,
+              );
               this.positionMap.setDex(tgtNft, 'meteora');
               isOrphan = false;
             }
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
         // Also check if it's a PancakeSwap position
         if (isOrphan && this.isPcsPositionChecker) {
           try {
             const isPcs = await this.isPcsPositionChecker(tgtNft);
             if (isPcs) {
-              logger.info(MODULE, `Reconcile: ${tgtNft.slice(0, 8)} is PCS position, backfilling dex='pancakeswap' and skipping`);
+              logger.info(
+                MODULE,
+                `Reconcile: ${tgtNft.slice(0, 8)} is PCS position, backfilling dex='pancakeswap' and skipping`,
+              );
               this.positionMap.setDex(tgtNft, 'pancakeswap');
               isOrphan = false;
             }
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
         if (isOrphan) {
           let shouldEnqueueClose = true;
@@ -2278,20 +2803,32 @@ export class ByrealPositionExecutor {
             if (ourStatus.isOrphan) {
               this.positionMap.delete(tgtNft);
               this.removeReferer(tgtNft);
-              logger.info(MODULE, `Reconcile: target ${tgtNft.slice(0, 8)} gone and our NFT ${ourNft.slice(0, 8)} already gone (${ourStatus.detail}), mapping removed`);
+              logger.info(
+                MODULE,
+                `Reconcile: target ${tgtNft.slice(0, 8)} gone and our NFT ${ourNft.slice(0, 8)} already gone (${ourStatus.detail}), mapping removed`,
+              );
               shouldEnqueueClose = false;
             }
           } catch (err: any) {
             if (this.isTransientError(err)) {
-              logger.debug(MODULE, `Reconcile: our NFT ${ourNft.slice(0, 8)} lookup transient error (${(err.message || '').slice(0, 80)}), keeping mapping`);
+              logger.debug(
+                MODULE,
+                `Reconcile: our NFT ${ourNft.slice(0, 8)} lookup transient error (${(err.message || '').slice(0, 80)}), keeping mapping`,
+              );
               shouldEnqueueClose = false;
             } else if (isPositionGoneError(err)) {
               this.positionMap.delete(tgtNft);
               this.removeReferer(tgtNft);
-              logger.info(MODULE, `Reconcile: target ${tgtNft.slice(0, 8)} gone and our NFT ${ourNft.slice(0, 8)} lookup says gone, mapping removed`);
+              logger.info(
+                MODULE,
+                `Reconcile: target ${tgtNft.slice(0, 8)} gone and our NFT ${ourNft.slice(0, 8)} lookup says gone, mapping removed`,
+              );
               shouldEnqueueClose = false;
             } else {
-              logger.warn(MODULE, `Reconcile: our NFT ${ourNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), keeping mapping`);
+              logger.warn(
+                MODULE,
+                `Reconcile: our NFT ${ourNft.slice(0, 8)} lookup failed (${(err.message || '').slice(0, 80)}), keeping mapping`,
+              );
               shouldEnqueueClose = false;
             }
           }
@@ -2313,7 +2850,7 @@ export class ByrealPositionExecutor {
           await this.closeOrphan(tgtNft, ourNft);
         });
       }
-    })().catch(err => {
+    })().catch((err) => {
       logger.error(MODULE, `Reconcile scan error: ${err.message}`);
     });
   }
@@ -2341,7 +2878,10 @@ export class ByrealPositionExecutor {
       );
       const orphanOk = await this.verifyTxSuccess(orphanTx);
       if (!orphanOk) {
-        logger.error(MODULE, `Orphan close TX failed on-chain: ${ourNft.slice(0, 8)}, keeping mapping`);
+        logger.error(
+          MODULE,
+          `Orphan close TX failed on-chain: ${ourNft.slice(0, 8)}, keeping mapping`,
+        );
         return;
       }
       this.positionMap.delete(tgtNft);
@@ -2364,7 +2904,9 @@ export class ByrealPositionExecutor {
    */
   private isTransientError(err: any): boolean {
     const msg = err?.message || '';
-    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(msg);
+    return /502|503|504|429|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout|Too Many Requests|Internal server error|Blockhash not found|block height exceeded|has expired|PriceSlippageCheck|0x1785/i.test(
+      msg,
+    );
   }
 
   /**
@@ -2387,15 +2929,22 @@ export class ByrealPositionExecutor {
     return chain;
   }
 
-  private async retryOnTransient<T>(fn: () => Promise<T>, label: string, maxRetries = 3): Promise<T> {
+  private async retryOnTransient<T>(
+    fn: () => Promise<T>,
+    label: string,
+    maxRetries = 3,
+  ): Promise<T> {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         return await fn();
       } catch (err: any) {
         if (attempt < maxRetries - 1 && this.isTransientError(err)) {
           const delay = 2000 * (attempt + 1);
-          logger.warn(MODULE, `${label}: transient error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms`);
-          await new Promise(r => setTimeout(r, delay));
+          logger.warn(
+            MODULE,
+            `${label}: transient error (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms`,
+          );
+          await new Promise((r) => setTimeout(r, delay));
           continue;
         }
         throw err;
@@ -2407,7 +2956,9 @@ export class ByrealPositionExecutor {
   /**
    * Retry wrapper for getPositionInfoByNftMint (handles RPC lag after TX).
    */
-  private async retryGetPosition(nftMint: PublicKey): Promise<IGetPositionInfoByNftMintReturn | null> {
+  private async retryGetPosition(
+    nftMint: PublicKey,
+  ): Promise<IGetPositionInfoByNftMintReturn | null> {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const info = await this.chain.getPositionInfoByNftMint(nftMint);
@@ -2416,7 +2967,7 @@ export class ByrealPositionExecutor {
         // RPC lag, retry
       }
       if (attempt < 2) {
-        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
       }
     }
     return null;
@@ -2431,7 +2982,7 @@ export class ByrealPositionExecutor {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) {
-          await new Promise(r => setTimeout(r, 3000 * attempt));
+          await new Promise((r) => setTimeout(r, 3000 * attempt));
         }
         const tx = await this.readConnection.getParsedTransaction(txSig, {
           maxSupportedTransactionVersion: 0,
@@ -2439,14 +2990,20 @@ export class ByrealPositionExecutor {
         });
         if (!tx?.meta) {
           if (attempt < 2) {
-            logger.debug(MODULE, `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`);
+            logger.debug(
+              MODULE,
+              `verifyTxSuccess: TX not found yet ${txSig.slice(0, 8)}, retry ${attempt + 1}/3`,
+            );
             continue;
           }
           logger.warn(MODULE, `verifyTxSuccess: TX not found after retries ${txSig.slice(0, 8)}`);
           return false;
         }
         if (tx.meta.err) {
-          logger.error(MODULE, `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`);
+          logger.error(
+            MODULE,
+            `TX failed on-chain: ${txSig.slice(0, 8)} err=${JSON.stringify(tx.meta.err)}`,
+          );
           return false;
         }
         return true;
@@ -2466,7 +3023,10 @@ export class ByrealPositionExecutor {
    * Parse a confirmed TX to extract token balance changes for our wallet.
    * Returns positive changes only (tokens we received).
    */
-  private async parseTxTokenChanges(txSig: string, owner: PublicKey): Promise<{ mint: PublicKey; amount: BN }[]> {
+  private async parseTxTokenChanges(
+    txSig: string,
+    owner: PublicKey,
+  ): Promise<{ mint: PublicKey; amount: BN }[]> {
     try {
       const tx = await this.readConnection.getParsedTransaction(txSig, {
         maxSupportedTransactionVersion: 0,
@@ -2514,7 +3074,10 @@ export class ByrealPositionExecutor {
     }
   }
 
-  queueImportedByrealAuditCloses(result: ByrealNftAuditResult, queue: OperationQueue): ByrealNftAuditResult {
+  queueImportedByrealAuditCloses(
+    result: ByrealNftAuditResult,
+    queue: OperationQueue,
+  ): ByrealNftAuditResult {
     result.closeQueued ??= [];
     result.enqueueFailed ??= [];
 
@@ -2543,7 +3106,9 @@ export class ByrealPositionExecutor {
 
     for (const programId of [TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID]) {
       try {
-        const accounts = await this.readConnection.getParsedTokenAccountsByOwner(owner, { programId });
+        const accounts = await this.readConnection.getParsedTokenAccountsByOwner(owner, {
+          programId,
+        });
         for (const { account } of accounts.value) {
           const info = account.data.parsed?.info;
           const tokenAmount = info?.tokenAmount;
@@ -2553,11 +3118,17 @@ export class ByrealPositionExecutor {
           }
         }
       } catch (err: any) {
-        logger.warn(MODULE, `[NftAudit] Token account scan failed for ${programId.toBase58()}: ${(err.message || '').slice(0, 100)}`);
+        logger.warn(
+          MODULE,
+          `[NftAudit] Token account scan failed for ${programId.toBase58()}: ${(err.message || '').slice(0, 100)}`,
+        );
       }
     }
 
-    logger.info(MODULE, `[NftAudit] Found ${candidates.size} NFT candidates in wallet, filtering Byreal positions...`);
+    logger.info(
+      MODULE,
+      `[NftAudit] Found ${candidates.size} NFT candidates in wallet, filtering Byreal positions...`,
+    );
 
     const onChainByrealNfts: string[] = [];
     const byrealInfo = new Map<string, IGetPositionInfoByNftMintReturn>();
@@ -2574,9 +3145,12 @@ export class ByrealPositionExecutor {
         // Not a Byreal position NFT, or stale token account; ignore for audit.
       }
       if (scanned % 50 === 0 || scanned === candidates.size) {
-        logger.info(MODULE, `[NftAudit] scanned=${scanned}/${candidates.size}, byreal=${onChainByrealNfts.length}`);
+        logger.info(
+          MODULE,
+          `[NftAudit] scanned=${scanned}/${candidates.size}, byreal=${onChainByrealNfts.length}`,
+        );
       }
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 50));
     }
 
     const result = diffByrealNftAudit(this.positionMap.getByrealNfts(), onChainByrealNfts);
@@ -2589,13 +3163,16 @@ export class ByrealPositionExecutor {
       this.positionMap.set(nft, nft, pool, 'ONCHAIN_AUDIT', tickLower, tickUpper, 'byreal');
       this.positionMap.setTargetLiquidity(nft, info.rawPositionInfo.liquidity.toString());
       result.importedToMapping.push(nft);
-      logger.warn(MODULE, `[NftAudit] imported on-chain Byreal NFT into mapping: ${nft.slice(0, 8)} (${pool})`);
+      logger.warn(
+        MODULE,
+        `[NftAudit] imported on-chain Byreal NFT into mapping: ${nft.slice(0, 8)} (${pool})`,
+      );
     }
     logger.info(
       MODULE,
       `[NftAudit] complete: mapped=${result.mappedCount}, onChain=${result.onChainCount}, ` +
-      `unmappedOnChain=${result.unmappedOnChain.length}, mappedMissingOnChain=${result.mappedMissingOnChain.length}, ` +
-      `imported=${result.importedToMapping.length}`,
+        `unmappedOnChain=${result.unmappedOnChain.length}, mappedMissingOnChain=${result.mappedMissingOnChain.length}, ` +
+        `imported=${result.importedToMapping.length}`,
     );
     for (const nft of result.unmappedOnChain) {
       logger.warn(MODULE, `[NftAudit] unmapped on-chain Byreal NFT: ${nft}`);
@@ -2657,7 +3234,16 @@ export class ByrealPositionExecutor {
   }
 
   // --- LP Position Assets ---
-  private _lpAssetsCache: { items: Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>; ts: number } | null = null;
+  private _lpAssetsCache: {
+    items: Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+    }>;
+    ts: number;
+  } | null = null;
   private static LP_ASSETS_TTL = 5 * 60 * 1000; // 5 min — synced with asset-trend interval
 
   /**
@@ -2667,8 +3253,19 @@ export class ByrealPositionExecutor {
    * computes exact tokenA/tokenB amounts using SDK LiquidityMath.
    * Cached for 5 min.
    */
-  public async getPositionAssets(): Promise<Array<{ mint: string; balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>> {
-    if (this._lpAssetsCache && Date.now() - this._lpAssetsCache.ts < ByrealPositionExecutor.LP_ASSETS_TTL) {
+  public async getPositionAssets(): Promise<
+    Array<{
+      mint: string;
+      balance: number;
+      decimals: number;
+      pairedStable: Record<string, number>;
+      liquidityUsd: number;
+    }>
+  > {
+    if (
+      this._lpAssetsCache &&
+      Date.now() - this._lpAssetsCache.ts < ByrealPositionExecutor.LP_ASSETS_TTL
+    ) {
       return this._lpAssetsCache.items;
     }
     const userAddress = getUserAddress();
@@ -2676,8 +3273,22 @@ export class ByrealPositionExecutor {
 
     // Fetch all active positions (paginate until we see liquidityUsd=0)
     // NOTE: Byreal indexer 對已關倉 position 偶爾仍回報 liquidityUsd > 0 但 positionAccountBase64: null
-    type ApiPosition = { poolAddress: string; positionAddress?: string; positionAccountBase64: string | null; lowerTick: number; upperTick: number; liquidityUsd: string };
-    type ApiPoolMap = Record<string, { accountBase64: string | null; mintA: { address: string; decimals: number }; mintB: { address: string; decimals: number } }>;
+    type ApiPosition = {
+      poolAddress: string;
+      positionAddress?: string;
+      positionAccountBase64: string | null;
+      lowerTick: number;
+      upperTick: number;
+      liquidityUsd: string;
+    };
+    type ApiPoolMap = Record<
+      string,
+      {
+        accountBase64: string | null;
+        mintA: { address: string; decimals: number };
+        mintB: { address: string; decimals: number };
+      }
+    >;
     const allPositions: ApiPosition[] = [];
     let poolMap: ApiPoolMap = {};
 
@@ -2688,7 +3299,7 @@ export class ByrealPositionExecutor {
           logger.warn(MODULE, `[LPAssets] Byreal API page ${page}: HTTP ${res.status}`);
           break;
         }
-        const json = await res.json() as any;
+        const json = (await res.json()) as any;
         const positions: ApiPosition[] = json?.result?.data?.positions ?? [];
         if (positions.length === 0) break;
 
@@ -2696,13 +3307,16 @@ export class ByrealPositionExecutor {
         const pm = json?.result?.data?.poolMap ?? {};
         poolMap = { ...poolMap, ...pm };
 
-        const active = positions.filter(p => parseFloat(p.liquidityUsd) > 0);
+        const active = positions.filter((p) => parseFloat(p.liquidityUsd) > 0);
         allPositions.push(...active);
 
         // If this page has closed positions, we've passed all active ones
         if (active.length < positions.length) break;
       } catch (err: any) {
-        logger.error(MODULE, `[LPAssets] Byreal API page ${page} error: ${(err.message || '').slice(0, 120)}`);
+        logger.error(
+          MODULE,
+          `[LPAssets] Byreal API page ${page} error: ${(err.message || '').slice(0, 120)}`,
+        );
         break;
       }
     }
@@ -2712,9 +3326,20 @@ export class ByrealPositionExecutor {
       return this._lpAssetsCache?.items ?? [];
     }
 
-    logger.info(MODULE, `[LPAssets] Fetched ${allPositions.length} active positions via Byreal API`);
+    logger.info(
+      MODULE,
+      `[LPAssets] Fetched ${allPositions.length} active positions via Byreal API`,
+    );
 
-    const totals = new Map<string, { balance: number; decimals: number; pairedStable: Record<string, number>; liquidityUsd: number }>();
+    const totals = new Map<
+      string,
+      {
+        balance: number;
+        decimals: number;
+        pairedStable: Record<string, number>;
+        liquidityUsd: number;
+      }
+    >();
 
     // Byreal API 偶發 stale data：見下方 guard；counter 分三類便於觀測
     let skippedNullPositionBase64 = 0;
@@ -2734,7 +3359,10 @@ export class ByrealPositionExecutor {
           continue;
         }
 
-        if (typeof pos.positionAccountBase64 !== 'string' || pos.positionAccountBase64.length === 0) {
+        if (
+          typeof pos.positionAccountBase64 !== 'string' ||
+          pos.positionAccountBase64.length === 0
+        ) {
           skippedNullPositionBase64++;
           continue;
         }
@@ -2756,7 +3384,11 @@ export class ByrealPositionExecutor {
         const sqrtPriceLower = SqrtPriceMath.getSqrtPriceX64FromTick(pos.lowerTick);
         const sqrtPriceUpper = SqrtPriceMath.getSqrtPriceX64FromTick(pos.upperTick);
         const { amountA, amountB } = LiquidityMath.getAmountsFromLiquidity(
-          sqrtPriceX64, sqrtPriceLower, sqrtPriceUpper, liquidity, false,
+          sqrtPriceX64,
+          sqrtPriceLower,
+          sqrtPriceUpper,
+          liquidity,
+          false,
         );
 
         const mintA = pool.mintA.address;
@@ -2766,9 +3398,19 @@ export class ByrealPositionExecutor {
 
         // Aggregate per-mint totals
         const prevA = totals.get(mintA);
-        totals.set(mintA, { balance: (prevA?.balance ?? 0) + uiA, decimals: decA, pairedStable: prevA?.pairedStable ?? {}, liquidityUsd: prevA?.liquidityUsd ?? 0 });
+        totals.set(mintA, {
+          balance: (prevA?.balance ?? 0) + uiA,
+          decimals: decA,
+          pairedStable: prevA?.pairedStable ?? {},
+          liquidityUsd: prevA?.liquidityUsd ?? 0,
+        });
         const prevB = totals.get(mintB);
-        totals.set(mintB, { balance: (prevB?.balance ?? 0) + uiB, decimals: decB, pairedStable: prevB?.pairedStable ?? {}, liquidityUsd: prevB?.liquidityUsd ?? 0 });
+        totals.set(mintB, {
+          balance: (prevB?.balance ?? 0) + uiB,
+          decimals: decB,
+          pairedStable: prevB?.pairedStable ?? {},
+          liquidityUsd: prevB?.liquidityUsd ?? 0,
+        });
 
         // Track paired stablecoins + attribute liquidityUsd to the non-stable side
         const mintAIsStable = STABLE_MINTS.has(mintA);
@@ -2789,21 +3431,39 @@ export class ByrealPositionExecutor {
           totals.get(mintA)!.liquidityUsd += posLiqUsd;
         }
       } catch (err: any) {
-        logger.warn(MODULE, `[LPAssets] decode error for pool=${pos.poolAddress} pos=${pos.positionAddress ?? '?'}: ${(err.message || '').slice(0, 100)}`);
+        logger.warn(
+          MODULE,
+          `[LPAssets] decode error for pool=${pos.poolAddress} pos=${pos.positionAddress ?? '?'}: ${(err.message || '').slice(0, 100)}`,
+        );
       }
     }
 
     if (skippedNullPositionBase64 > 0) {
-      logger.warn(MODULE, `[LPAssets] Byreal indexer stale: skipped ${skippedNullPositionBase64} positions with null positionAccountBase64 (likely closed on-chain but still indexed as active)`);
+      logger.warn(
+        MODULE,
+        `[LPAssets] Byreal indexer stale: skipped ${skippedNullPositionBase64} positions with null positionAccountBase64 (likely closed on-chain but still indexed as active)`,
+      );
     }
     if (skippedNullPoolBase64 > 0) {
-      logger.warn(MODULE, `[LPAssets] Byreal API inconsistent: skipped ${skippedNullPoolBase64} positions with null/empty pool.accountBase64 (partial poolMap payload)`);
+      logger.warn(
+        MODULE,
+        `[LPAssets] Byreal API inconsistent: skipped ${skippedNullPoolBase64} positions with null/empty pool.accountBase64 (partial poolMap payload)`,
+      );
     }
     if (skippedMissingPoolMap > 0) {
-      logger.warn(MODULE, `[LPAssets] Byreal API inconsistent: skipped ${skippedMissingPoolMap} positions with missing poolMap entry`);
+      logger.warn(
+        MODULE,
+        `[LPAssets] Byreal API inconsistent: skipped ${skippedMissingPoolMap} positions with missing poolMap entry`,
+      );
     }
 
-    const items = [...totals.entries()].map(([mint, d]) => ({ mint, balance: d.balance, decimals: d.decimals, pairedStable: d.pairedStable, liquidityUsd: d.liquidityUsd }));
+    const items = [...totals.entries()].map(([mint, d]) => ({
+      mint,
+      balance: d.balance,
+      decimals: d.decimals,
+      pairedStable: d.pairedStable,
+      liquidityUsd: d.liquidityUsd,
+    }));
     this._lpAssetsCache = { items, ts: Date.now() };
     return items;
   }
@@ -2826,16 +3486,20 @@ export class ByrealPositionExecutor {
    * Falls back to 0 when neither token is a stable coin.
    */
   private checkConcentrationLimit(
-    mintAStr: string, mintBStr: string,
+    mintAStr: string,
+    mintBStr: string,
     targetWallet: string | undefined,
-    posAUiAmount: string | undefined, posBUiAmount: string | undefined,
+    posAUiAmount: string | undefined,
+    posBUiAmount: string | undefined,
     poolInfo: { sqrtPriceX64: BN; mintDecimalsA: number; mintDecimalsB: number } | undefined,
     tag: string,
   ): string | null {
     // Identify the non-stable side of the pair
-    const mintToCheck = !STABLE_MINTS.has(mintAStr) ? mintAStr
-      : !STABLE_MINTS.has(mintBStr) ? mintBStr
-      : null;
+    const mintToCheck = !STABLE_MINTS.has(mintAStr)
+      ? mintAStr
+      : !STABLE_MINTS.has(mintBStr)
+        ? mintBStr
+        : null;
     if (!mintToCheck) return null; // both stable — skip check
 
     const override = config.coinConcentrationOverrides.get(mintToCheck);
@@ -2843,7 +3507,8 @@ export class ByrealPositionExecutor {
     const limitPct = override?.pct ?? config.maxCoinConcentrationPct;
     if (limitUsd <= 0 && limitPct <= 0) return null; // disabled
 
-    const existingLiqUsd = this._lpAssetsCache?.items.find(i => i.mint === mintToCheck)?.liquidityUsd ?? 0;
+    const existingLiqUsd =
+      this._lpAssetsCache?.items.find((i) => i.mint === mintToCheck)?.liquidityUsd ?? 0;
 
     // Derive current pool price from sqrtPriceX64 (fixed-point Q64.64)
     // priceAinB = (sqrtPriceX64 / 2^64)² × 10^decA / 10^decB
@@ -2854,8 +3519,9 @@ export class ByrealPositionExecutor {
       const SCALE = 1_000_000;
       const sqrtScaled = poolInfo.sqrtPriceX64.mul(new BN(SCALE)).div(TWO_POW_64).toNumber();
       const sqrtPrice = sqrtScaled / SCALE;
-      const priceAinB = sqrtPrice * sqrtPrice
-        * Math.pow(10, poolInfo.mintDecimalsA) / Math.pow(10, poolInfo.mintDecimalsB);
+      const priceAinB =
+        (sqrtPrice * sqrtPrice * Math.pow(10, poolInfo.mintDecimalsA)) /
+        Math.pow(10, poolInfo.mintDecimalsB);
 
       const amtA = parseFloat(posAUiAmount || '0');
       const amtB = parseFloat(posBUiAmount || '0');
@@ -2886,7 +3552,6 @@ export class ByrealPositionExecutor {
     }
     return null;
   }
-
 }
 
 function createMemoInstruction(data: string, signers: PublicKey[] = []): TransactionInstruction {

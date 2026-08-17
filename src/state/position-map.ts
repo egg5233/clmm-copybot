@@ -8,13 +8,13 @@ const MODULE = 'PositionMap';
 interface PositionEntry {
   ourNft: string;
   createdAt: number;
-  pool?: string;  // e.g. "MNT/USDC"
-  targetWallet?: string;  // which target wallet this position came from
-  lockedSol?: number;  // SOL rent locked when this position was opened (lamports → SOL)
-  tickLower?: number;  // tick range lower bound
-  tickUpper?: number;  // tick range upper bound
-  dex?: string;  // 'orca' for Orca Whirlpool positions (default: byreal)
-  targetLiquidity?: string;  // target's liquidity at open time (BN string), for proportional decrease
+  pool?: string; // e.g. "MNT/USDC"
+  targetWallet?: string; // which target wallet this position came from
+  lockedSol?: number; // SOL rent locked when this position was opened (lamports → SOL)
+  tickLower?: number; // tick range lower bound
+  tickUpper?: number; // tick range upper bound
+  dex?: string; // 'orca' for Orca Whirlpool positions (default: byreal)
+  targetLiquidity?: string; // target's liquidity at open time (BN string), for proportional decrease
 }
 
 /**
@@ -72,10 +72,29 @@ export class PositionMap {
     }
   }
 
-  set(targetNft: string, myNft: string, pool?: string, targetWallet?: string, tickLower?: number, tickUpper?: number, dex?: string): void {
-    this.map.set(targetNft, { ourNft: myNft, createdAt: Date.now(), pool, targetWallet, tickLower, tickUpper, dex });
+  set(
+    targetNft: string,
+    myNft: string,
+    pool?: string,
+    targetWallet?: string,
+    tickLower?: number,
+    tickUpper?: number,
+    dex?: string,
+  ): void {
+    this.map.set(targetNft, {
+      ourNft: myNft,
+      createdAt: Date.now(),
+      pool,
+      targetWallet,
+      tickLower,
+      tickUpper,
+      dex,
+    });
     this.save();
-    logger.info(MODULE, `Mapped: ${targetNft.slice(0, 8)} -> ${myNft.slice(0, 8)}${pool ? ` (${pool})` : ''}${targetWallet ? ` from ${targetWallet.slice(0, 4)}..` : ''}`);
+    logger.info(
+      MODULE,
+      `Mapped: ${targetNft.slice(0, 8)} -> ${myNft.slice(0, 8)}${pool ? ` (${pool})` : ''}${targetWallet ? ` from ${targetWallet.slice(0, 4)}..` : ''}`,
+    );
   }
 
   /**
@@ -83,7 +102,12 @@ export class PositionMap {
    * targetWallet in the same pool with the same tick range (but a different NFT).
    * Used to detect when a target wallet opens duplicate positions with different referers.
    */
-  hasDuplicateTickRange(targetWallet: string, pool: string, tickLower: number, tickUpper: number): boolean {
+  hasDuplicateTickRange(
+    targetWallet: string,
+    pool: string,
+    tickLower: number,
+    tickUpper: number,
+  ): boolean {
     for (const entry of this.map.values()) {
       if (
         entry.targetWallet === targetWallet &&
@@ -130,7 +154,7 @@ export class PositionMap {
   }
 
   getAllMyNfts(): string[] {
-    return Array.from(this.map.values()).map(e => e.ourNft);
+    return Array.from(this.map.values()).map((e) => e.ourNft);
   }
 
   /** Our NFT mints for Byreal positions only (legacy entries with no dex tag count as byreal). */
@@ -165,8 +189,18 @@ export class PositionMap {
   }
 
   /** Count positions by dex type. Returns { byreal, orca, meteora, pancakeswap }. */
-  countByDex(): { byreal: number; orca: number; meteora: number; pancakeswap: number; dammv2: number } {
-    let byreal = 0, orca = 0, meteora = 0, pancakeswap = 0, dammv2 = 0;
+  countByDex(): {
+    byreal: number;
+    orca: number;
+    meteora: number;
+    pancakeswap: number;
+    dammv2: number;
+  } {
+    let byreal = 0,
+      orca = 0,
+      meteora = 0,
+      pancakeswap = 0,
+      dammv2 = 0;
     for (const entry of this.map.values()) {
       if (entry.dex === 'orca') orca++;
       else if (entry.dex === 'meteora') meteora++;
@@ -182,8 +216,18 @@ export class PositionMap {
   }
 
   /** Sum lockedSol by dex type. Returns { byreal, orca, meteora, pancakeswap, dammv2 }. */
-  getTotalLockedSolByDex(byrealFallback: number, orcaFallback: number, meteoraFallback: number = 0.0079, pcsFallback: number = 0.0090132, dammv2Fallback: number = 0.0089088): { byreal: number; orca: number; meteora: number; pancakeswap: number; dammv2: number } {
-    let byreal = 0, orca = 0, meteora = 0, pancakeswap = 0, dammv2 = 0;
+  getTotalLockedSolByDex(
+    byrealFallback: number,
+    orcaFallback: number,
+    meteoraFallback: number = 0.0079,
+    pcsFallback: number = 0.0090132,
+    dammv2Fallback: number = 0.0089088,
+  ): { byreal: number; orca: number; meteora: number; pancakeswap: number; dammv2: number } {
+    let byreal = 0,
+      orca = 0,
+      meteora = 0,
+      pancakeswap = 0,
+      dammv2 = 0;
     for (const entry of this.map.values()) {
       if (entry.dex === 'orca') {
         orca += entry.lockedSol ?? orcaFallback;
@@ -265,8 +309,31 @@ export class PositionMap {
   }
 
   /** Full data with timestamps (for dashboard). */
-  toJSON(): Record<string, { ourNft: string; createdAt: number; pool?: string; targetWallet?: string; lockedSol?: number; tickLower?: number; tickUpper?: number; dex?: string }> {
-    const obj: Record<string, { ourNft: string; createdAt: number; pool?: string; targetWallet?: string; lockedSol?: number; tickLower?: number; tickUpper?: number }> = {};
+  toJSON(): Record<
+    string,
+    {
+      ourNft: string;
+      createdAt: number;
+      pool?: string;
+      targetWallet?: string;
+      lockedSol?: number;
+      tickLower?: number;
+      tickUpper?: number;
+      dex?: string;
+    }
+  > {
+    const obj: Record<
+      string,
+      {
+        ourNft: string;
+        createdAt: number;
+        pool?: string;
+        targetWallet?: string;
+        lockedSol?: number;
+        tickLower?: number;
+        tickUpper?: number;
+      }
+    > = {};
     for (const [key, entry] of this.map) {
       obj[key] = entry;
     }

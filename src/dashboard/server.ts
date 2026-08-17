@@ -5,19 +5,51 @@ import zlib from 'zlib';
 import { execSync } from 'child_process';
 import { PublicKey } from '@solana/web3.js';
 import WebSocket = require('ws');
-import { config, DAC_TOKEN_OPTIONS, normalizeByrealMaxOpenPositions, normalizeDacTargetToken } from '../config';
+import {
+  config,
+  DAC_TOKEN_OPTIONS,
+  normalizeByrealMaxOpenPositions,
+  normalizeDacTargetToken,
+} from '../config';
 import { logger, logEmitter, getRecentLogs, LogEntry } from '../utils/logger';
 import { getUserAddress } from '../utils/wallet';
 import { BotContext } from './context';
 import { getAssetTrend, forceSnapshot, getTrendLatestTs } from './asset-trend';
-import { claimCopyBonus, claimLpFeesOffchain, lastClaimTs, lastClaimResult, getClaimHistory } from '../executor/auto-claim';
-import { setPoolTvlRefreshMinutes, getTvlCacheInfo, fetchAndCache as refreshTvlCache, checkTokenLiquidity } from '../monitor/pool-tvl';
+import {
+  claimCopyBonus,
+  claimLpFeesOffchain,
+  lastClaimTs,
+  lastClaimResult,
+  getClaimHistory,
+} from '../executor/auto-claim';
+import {
+  setPoolTvlRefreshMinutes,
+  getTvlCacheInfo,
+  fetchAndCache as refreshTvlCache,
+  checkTokenLiquidity,
+} from '../monitor/pool-tvl';
 import { updateEnvFile } from '../utils/env';
-import { normalizeByrealAllowSameTickWallets, serializeWalletSet } from '../utils/byreal-allow-same-tick';
+import {
+  normalizeByrealAllowSameTickWallets,
+  serializeWalletSet,
+} from '../utils/byreal-allow-same-tick';
 import { applyPoolAgeWhitelistConfig } from '../utils/pool-age-whitelist';
-import { getPumpPendingList, resolvePump, deletePumpEntry, addPumpPending, pollApprovals, setPumpPollerWallet } from '../state/pump-pending';
+import {
+  getPumpPendingList,
+  resolvePump,
+  deletePumpEntry,
+  addPumpPending,
+  pollApprovals,
+  setPumpPollerWallet,
+} from '../state/pump-pending';
 import { notifyPumpApproval } from '../discord/notify';
-import { getDacHistory, getDacNextScheduledTime, triggerDac, stopDacScheduler, startDacScheduler } from '../executor/dac';
+import {
+  getDacHistory,
+  getDacNextScheduledTime,
+  triggerDac,
+  stopDacScheduler,
+  startDacScheduler,
+} from '../executor/dac';
 
 const MODULE = 'Dashboard';
 const CC_OVERRIDES_FILE = path.resolve('./data/coin-concentration-overrides.json');
@@ -28,7 +60,9 @@ export function applyByrealMaxOpenPositionsConfig(
   envUpdates: Record<string, string> = {},
 ): Record<string, string> {
   if (body.byrealMaxOpenPositions !== undefined) {
-    const normalizedByrealMaxOpenPositions = normalizeByrealMaxOpenPositions(body.byrealMaxOpenPositions);
+    const normalizedByrealMaxOpenPositions = normalizeByrealMaxOpenPositions(
+      body.byrealMaxOpenPositions,
+    );
     targetConfig.byrealMaxOpenPositions = normalizedByrealMaxOpenPositions;
     envUpdates.BYREAL_MAX_OPEN_POSITIONS = String(normalizedByrealMaxOpenPositions);
   }
@@ -42,9 +76,11 @@ function loadCcOverrides(): void {
     const overrides: Array<{ mint: string; usd: number; pct: number }> = raw.overrides ?? [];
     config.coinConcentrationOverrides.clear();
     for (const o of overrides) {
-      if (o.mint) config.coinConcentrationOverrides.set(o.mint, { usd: o.usd ?? 0, pct: o.pct ?? 0 });
+      if (o.mint)
+        config.coinConcentrationOverrides.set(o.mint, { usd: o.usd ?? 0, pct: o.pct ?? 0 });
     }
-    if (overrides.length > 0) logger.info(MODULE, `Loaded ${overrides.length} coin concentration overrides`);
+    if (overrides.length > 0)
+      logger.info(MODULE, `Loaded ${overrides.length} coin concentration overrides`);
   } catch (err: any) {
     logger.warn(MODULE, `Failed to load CC overrides: ${err.message}`);
   }
@@ -54,8 +90,11 @@ function saveCcOverrides(): void {
   try {
     const dir = path.dirname(CC_OVERRIDES_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const overrides = Array.from(config.coinConcentrationOverrides.entries())
-      .map(([mint, v]) => ({ mint, usd: v.usd, pct: v.pct }));
+    const overrides = Array.from(config.coinConcentrationOverrides.entries()).map(([mint, v]) => ({
+      mint,
+      usd: v.usd,
+      pct: v.pct,
+    }));
     fs.writeFileSync(CC_OVERRIDES_FILE, JSON.stringify({ overrides }, null, 2));
   } catch (err: any) {
     logger.warn(MODULE, `Failed to save CC overrides: ${err.message}`);
@@ -81,7 +120,7 @@ async function drainPumpNotifyQueue(): Promise<void> {
     } catch (err: any) {
       logger.warn(MODULE, `Pump notification failed: ${task.symbol} — ${err.message}`);
     }
-    if (pumpNotifyQueue.length > 0) await new Promise(r => setTimeout(r, 2000));
+    if (pumpNotifyQueue.length > 0) await new Promise((r) => setTimeout(r, 2000));
   }
   pumpNotifyRunning = false;
 }
@@ -113,7 +152,7 @@ async function fetchSolPrice(): Promise<number> {
       headers: { 'x-api-key': jupApiKey },
     });
     if (!res.ok) return cachedSolPrice;
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
     const price = data?.[SOL_MINT]?.usdPrice;
     if (price > 0) {
       cachedSolPrice = parseFloat(String(price));
@@ -134,7 +173,11 @@ export async function refreshSolPrice(): Promise<void> {
 }
 
 // --- Auth Log (disk-persisted, independent from bot logs) ---
-interface AuthLogEntry { ts: number; ip: string; event: string; }
+interface AuthLogEntry {
+  ts: number;
+  ip: string;
+  event: string;
+}
 const AUTH_LOG_FILE = './data/auth-log.json';
 const MAX_AUTH_LOG = 200;
 let authLog: AuthLogEntry[] = [];
@@ -144,7 +187,9 @@ function loadAuthLog(): void {
     if (fs.existsSync(AUTH_LOG_FILE)) {
       authLog = JSON.parse(fs.readFileSync(AUTH_LOG_FILE, 'utf-8'));
     }
-  } catch { authLog = []; }
+  } catch {
+    authLog = [];
+  }
 }
 
 function pushAuthLog(ip: string, event: string): void {
@@ -154,11 +199,17 @@ function pushAuthLog(ip: string, event: string): void {
     const dir = path.dirname(AUTH_LOG_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(AUTH_LOG_FILE, JSON.stringify(authLog));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // --- Token Info Cache (disk-persisted, lazy API fetch on unknown mint) ---
-interface TokenInfo { symbol: string; decimals: number; logoURI?: string; }
+interface TokenInfo {
+  symbol: string;
+  decimals: number;
+  logoURI?: string;
+}
 const tokenInfoCache = new Map<string, TokenInfo>();
 const TOKEN_CACHE_FILE = './data/token-names.json';
 let apiFetchedThisRun = false; // Only fetch API once per run
@@ -171,13 +222,18 @@ function loadTokenInfo(): void {
       let count = 0;
       for (const [mint, info] of Object.entries(cached)) {
         const ti = info as TokenInfo;
-        if (ti.symbol) { tokenInfoCache.set(mint, ti); count++; }
+        if (ti.symbol) {
+          tokenInfoCache.set(mint, ti);
+          count++;
+        }
       }
       if (count > 0) {
         logger.info(MODULE, `Loaded ${count} token info from disk cache`);
       }
     }
-  } catch { /* disk read failed */ }
+  } catch {
+    /* disk read failed */
+  }
 }
 
 async function fetchAndCacheTokenInfo(): Promise<void> {
@@ -185,8 +241,8 @@ async function fetchAndCacheTokenInfo(): Promise<void> {
     const res = await fetch('https://api2.byreal.io/byreal/api/dex/v2/mint/list?pageSize=100', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.byreal.io/',
+        Accept: 'application/json',
+        Referer: 'https://www.byreal.io/',
       },
     });
     if (!res.ok) {
@@ -225,7 +281,9 @@ function saveTokenCache(): void {
     const obj: Record<string, TokenInfo> = {};
     for (const [k, v] of tokenInfoCache) obj[k] = v;
     fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(obj, null, 2));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function resolveTokenName(mint: string): string {
@@ -242,12 +300,12 @@ function resolveTokenName(mint: string): string {
 
 /** Batch-resolve unknown mints via Jupiter Token API. Call (await) before API responses. */
 async function ensureTokenNames(mints: string[]): Promise<void> {
-  const unknown = mints.filter(m => m && !tokenInfoCache.has(m));
+  const unknown = mints.filter((m) => m && !tokenInfoCache.has(m));
   if (unknown.length === 0) return;
   const unique = [...new Set(unknown)];
   let resolved = 0;
   // Jupiter API key header (if configured)
-  const jupHeaders: Record<string, string> = { 'Accept': 'application/json' };
+  const jupHeaders: Record<string, string> = { Accept: 'application/json' };
   if (config.jupApiKey) jupHeaders['x-api-key'] = config.jupApiKey;
   // Batch via Jupiter tokens endpoint (up to 100 at a time)
   for (let i = 0; i < unique.length; i += 100) {
@@ -279,7 +337,7 @@ async function ensureTokenNames(mints: string[]): Promise<void> {
     }
   }
   // Fallback 1: individually fetch any still-unknown mints from Jupiter
-  const stillUnknown = unique.filter(m => !tokenInfoCache.has(m));
+  const stillUnknown = unique.filter((m) => !tokenInfoCache.has(m));
   for (const mint of stillUnknown) {
     try {
       const res = await fetch(`https://tokens.jup.ag/token/${mint}`, {
@@ -301,7 +359,7 @@ async function ensureTokenNames(mints: string[]): Promise<void> {
     }
   }
   // Fallback 2: Helius DAS API (getAssetBatch) — supports Token2022 + pump tokens
-  const finalUnknown = unique.filter(m => !tokenInfoCache.has(m));
+  const finalUnknown = unique.filter((m) => !tokenInfoCache.has(m));
   if (finalUnknown.length > 0 && config.rpcUrl) {
     const apiKeyMatch = config.rpcUrl.match(/api-key=([a-f0-9-]+)/i);
     if (apiKeyMatch) {
@@ -313,7 +371,8 @@ async function ensureTokenNames(mints: string[]): Promise<void> {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              jsonrpc: '2.0', id: 'token-names',
+              jsonrpc: '2.0',
+              id: 'token-names',
               method: 'getAssetBatch',
               params: { ids: batch },
             }),
@@ -351,7 +410,6 @@ async function ensureTokenNames(mints: string[]): Promise<void> {
     logger.warn(MODULE, `Failed to resolve ${unique.length} token names: ${unique.join(', ')}`);
   }
 }
-
 
 function resolveDecimals(mint: string): number {
   return tokenInfoCache.get(mint)?.decimals ?? 6;
@@ -430,7 +488,9 @@ export function startDashboard(ctx: BotContext): void {
   // Load token info from disk cache; fetch API only if some tokens are missing logos
   loadTokenInfo();
   let missingLogos = 0;
-  for (const [, info] of tokenInfoCache) { if (!info.logoURI) missingLogos++; }
+  for (const [, info] of tokenInfoCache) {
+    if (!info.logoURI) missingLogos++;
+  }
   if (missingLogos > 0) {
     logger.info(MODULE, `${missingLogos} tokens missing logoURI, fetching from API...`);
     fetchAndCacheTokenInfo().catch(() => {});
@@ -465,7 +525,11 @@ export function startDashboard(ctx: BotContext): void {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, PUT, OPTIONS');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
     const url = new URL(req.url || '/', `http://localhost:${port}`);
     const pathname = url.pathname;
@@ -552,7 +616,9 @@ export function startDashboard(ctx: BotContext): void {
             ws.close(4003, '密碼錯誤');
           }
         }
-      } catch { /* ignore bad messages */ }
+      } catch {
+        /* ignore bad messages */
+      }
     });
 
     ws.on('close', () => {
@@ -603,8 +669,8 @@ function serveHTML(res: http.ServerResponse): void {
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
+      Pragma: 'no-cache',
+      Expires: '0',
     });
     res.end(html);
   } catch {
@@ -637,21 +703,43 @@ async function handleAPI(
     const meteoraRent = ctx.meteoraExecutor?.rentPerPosition ?? 0.0079;
     const pcsRent = ctx.pcsExecutor?.rentPerPosition ?? 0.0090132;
     const dammv2Rent = ctx.dammv2Executor?.rentPerPosition ?? 0.0089088;
-    const lockedByDex = ctx.positionMap.getTotalLockedSolByDex(ctx.executor.rentPerPosition, orcaRent, meteoraRent, pcsRent, dammv2Rent);
-    const lockedSol = +(lockedByDex.byreal + lockedByDex.orca + lockedByDex.meteora + lockedByDex.pancakeswap + lockedByDex.dammv2).toFixed(5);
+    const lockedByDex = ctx.positionMap.getTotalLockedSolByDex(
+      ctx.executor.rentPerPosition,
+      orcaRent,
+      meteoraRent,
+      pcsRent,
+      dammv2Rent,
+    );
+    const lockedSol = +(
+      lockedByDex.byreal +
+      lockedByDex.orca +
+      lockedByDex.meteora +
+      lockedByDex.pancakeswap +
+      lockedByDex.dammv2
+    ).toFixed(5);
     const lockedUsd = cachedSolPrice > 0 ? +(lockedSol * cachedSolPrice).toFixed(2) : null;
     const solBalance = ctx.executor.cachedSolBalance ?? 0;
     const estimatedSlots = ctx.executor.estimateOpenSlots(solBalance);
     return json({
       version: pkg.version,
-      status: ctx.executor.drawdownPaused ? '資產跌幅暫停' : ctx.executor.solPaused ? 'SOL 不足' : '運行中',
+      status: ctx.executor.drawdownPaused
+        ? '資產跌幅暫停'
+        : ctx.executor.solPaused
+          ? 'SOL 不足'
+          : '運行中',
       uptime: Math.floor((Date.now() - ctx.startedAt) / 1000),
       dryRun: config.dryRun,
       wallet: getUserAddress().toBase58(),
       positions: posCount,
       posByDex,
       lockedSol,
-      lockedByDex: { byreal: +lockedByDex.byreal.toFixed(5), orca: +lockedByDex.orca.toFixed(5), meteora: +lockedByDex.meteora.toFixed(5), pancakeswap: +lockedByDex.pancakeswap.toFixed(5), dammv2: +lockedByDex.dammv2.toFixed(5) },
+      lockedByDex: {
+        byreal: +lockedByDex.byreal.toFixed(5),
+        orca: +lockedByDex.orca.toFixed(5),
+        meteora: +lockedByDex.meteora.toFixed(5),
+        pancakeswap: +lockedByDex.pancakeswap.toFixed(5),
+        dammv2: +lockedByDex.dammv2.toFixed(5),
+      },
       lockedUsd,
       solPrice: cachedSolPrice > 0 ? +cachedSolPrice.toFixed(2) : null,
       solBalance: +solBalance.toFixed(4),
@@ -664,7 +752,7 @@ async function handleAPI(
         [...ctx.executor.tokenCooldowns.entries()].map(([mint, until]) => {
           const info = tokenInfoCache.get(mint);
           return [mint, { until, symbol: info?.symbol || null }];
-        })
+        }),
       ),
       tokenLossStreak: Object.fromEntries(ctx.executor.tokenLossStreak),
       estimatedSlots,
@@ -711,7 +799,11 @@ async function handleAPI(
   // DELETE /api/auth-log
   if (method === 'DELETE' && pathname === '/api/auth-log') {
     authLog.length = 0;
-    try { fs.writeFileSync(AUTH_LOG_FILE, '[]'); } catch { /* ignore */ }
+    try {
+      fs.writeFileSync(AUTH_LOG_FILE, '[]');
+    } catch {
+      /* ignore */
+    }
     return json({ ok: true });
   }
 
@@ -746,11 +838,21 @@ async function handleAPI(
   if (method === 'GET' && pathname === '/api/stats') {
     const events = ctx.eventLog;
     // Per-wallet + per-type breakdown
-    const byWallet: Record<string, { total: number; success: number; fail: number; skip: number }> = {};
-    const byWalletType: Record<string, Record<string, { total: number; success: number; fail: number }>> = {};
+    const byWallet: Record<string, { total: number; success: number; fail: number; skip: number }> =
+      {};
+    const byWalletType: Record<
+      string,
+      Record<string, { total: number; success: number; fail: number }>
+    > = {};
     // Per-dex+wallet breakdown: key = "dex:wallet"
-    const byDexWallet: Record<string, { total: number; success: number; fail: number; skip: number }> = {};
-    const byDexWalletType: Record<string, Record<string, { total: number; success: number; fail: number }>> = {};
+    const byDexWallet: Record<
+      string,
+      { total: number; success: number; fail: number; skip: number }
+    > = {};
+    const byDexWalletType: Record<
+      string,
+      Record<string, { total: number; success: number; fail: number }>
+    > = {};
 
     for (const e of events) {
       const t = e.type || 'UNKNOWN';
@@ -760,35 +862,54 @@ async function handleAPI(
       // By wallet (legacy, all DEX combined)
       if (!byWallet[w]) byWallet[w] = { total: 0, success: 0, fail: 0, skip: 0 };
       byWallet[w].total++;
-      if (t === 'SKIP') { byWallet[w].skip++; }
-      else if (e.success) { byWallet[w].success++; }
-      else { byWallet[w].fail++; }
+      if (t === 'SKIP') {
+        byWallet[w].skip++;
+      } else if (e.success) {
+        byWallet[w].success++;
+      } else {
+        byWallet[w].fail++;
+      }
 
       // By wallet + type (legacy)
       if (!byWalletType[w]) byWalletType[w] = {};
       if (!byWalletType[w][t]) byWalletType[w][t] = { total: 0, success: 0, fail: 0 };
       byWalletType[w][t].total++;
-      if (e.success || t === 'SKIP') { byWalletType[w][t].success++; }
-      else { byWalletType[w][t].fail++; }
+      if (e.success || t === 'SKIP') {
+        byWalletType[w][t].success++;
+      } else {
+        byWalletType[w][t].fail++;
+      }
 
       // By dex+wallet (new, per-dex stats)
       if (dex) {
         const dk = dex + ':' + w;
         if (!byDexWallet[dk]) byDexWallet[dk] = { total: 0, success: 0, fail: 0, skip: 0 };
         byDexWallet[dk].total++;
-        if (t === 'SKIP') { byDexWallet[dk].skip++; }
-        else if (e.success) { byDexWallet[dk].success++; }
-        else { byDexWallet[dk].fail++; }
+        if (t === 'SKIP') {
+          byDexWallet[dk].skip++;
+        } else if (e.success) {
+          byDexWallet[dk].success++;
+        } else {
+          byDexWallet[dk].fail++;
+        }
 
         // Normalize type by stripping DEX prefix (e.g. ORCA_OPEN → OPEN)
         const prefixes = ['ORCA_', 'METEORA_', 'PCS_', 'DAMMV2_'];
         let nt = t;
-        for (const p of prefixes) { if (t.startsWith(p)) { nt = t.slice(p.length); break; } }
+        for (const p of prefixes) {
+          if (t.startsWith(p)) {
+            nt = t.slice(p.length);
+            break;
+          }
+        }
         if (!byDexWalletType[dk]) byDexWalletType[dk] = {};
         if (!byDexWalletType[dk][nt]) byDexWalletType[dk][nt] = { total: 0, success: 0, fail: 0 };
         byDexWalletType[dk][nt].total++;
-        if (e.success || nt === 'SKIP') { byDexWalletType[dk][nt].success++; }
-        else { byDexWalletType[dk][nt].fail++; }
+        if (e.success || nt === 'SKIP') {
+          byDexWalletType[dk][nt].success++;
+        } else {
+          byDexWalletType[dk][nt].fail++;
+        }
       }
     }
 
@@ -830,7 +951,9 @@ async function handleAPI(
             config.byrealProgramId,
           );
           positionAddress = pda.toBase58();
-        } catch { /* ignore invalid keys */ }
+        } catch {
+          /* ignore invalid keys */
+        }
         enriched[key] = { ...val, poolDisplay, mintA, mintB, positionAddress };
       }
       json(enriched);
@@ -880,65 +1003,72 @@ async function handleAPI(
   // GET /api/config
   if (method === 'GET' && pathname === '/api/config') {
     const cfgMints = [...Array.from(config.tokenBlacklist), ...Array.from(config.tokenWhitelist)];
-    ensureTokenNames(cfgMints).then(() => json({
-      targetWallets: config.targetWallets.map(w => w.toBase58()),
-      closeOnlyWallets: Array.from(config.closeOnlyWallets),
-      byrealAllowSameTickWallets: Array.from(config.byrealAllowSameTickWallets),
-      byrealAllowOpenAfterOthersWallets: Array.from(config.byrealAllowOpenAfterOthersWallets),
-      byrealMaxOpenPositions: config.byrealMaxOpenPositions,
-      amountRatio: config.amountRatio,
-      walletAmountRatios: Object.fromEntries(config.walletAmountRatios),
-      skipSameTickRange: config.skipSameTickRange,
-      pumpFilterMode: config.pumpFilterMode,
-      minPoolAgeDays: config.minPoolAgeDays,
-      poolAgeWhitelist: Array.from(config.poolAgeWhitelist),
-      maxCoinConcentrationUsd: config.maxCoinConcentrationUsd,
-      maxCoinConcentrationPct: config.maxCoinConcentrationPct,
-      coinConcentrationOverrides: Array.from(config.coinConcentrationOverrides.entries())
-        .map(([mint, v]) => ({ mint, usd: v.usd, pct: v.pct })),
-      slippageBps: config.slippageBps,
-      maxRetry: config.maxRetry,
-      priorityFeeLamports: config.priorityFeeLamports,
-      dryRun: config.dryRun,
-      allowSameWalletReopen: config.allowSameWalletReopen,
-      drawdownThresholdPct: config.drawdownThresholdPct,
-      tokenLossStreakLimit: config.tokenLossStreakLimit,
-      tokenCooldownMinutes: config.tokenCooldownMinutes,
-      jupSwapMode: config.jupSwapMode,
-      tokenBlacklist: Array.from(config.tokenBlacklist).map(m => ({
-        mint: m, symbol: resolveTokenName(m), logoURI: resolveLogoURI(m),
-      })),
-      tokenWhitelist: Array.from(config.tokenWhitelist).map(m => ({
-        mint: m, symbol: resolveTokenName(m), logoURI: resolveLogoURI(m),
-      })),
-      autoClaimEnabled: config.autoClaimEnabled,
-      minPoolTvl: config.minPoolTvl,
-      tvlSource: config.tvlSource,
-      poolTvlWhitelist: Array.from(config.poolTvlWhitelist),
-      poolTvlRefreshMinutes: config.poolTvlRefreshMinutes,
-      // Skip SOL pools (per-DEX)
-      byrealSkipSol: config.byrealSkipSol,
-      orcaSkipSol: config.orcaSkipSol,
-      meteoraSkipSol: config.meteoraSkipSol,
-      // Orca
-      orcaTargetWallets: config.orcaTargetWallets.map(w => w.toBase58()),
-      orcaCloseOnlyWallets: Array.from(config.orcaCloseOnlyWallets),
-      orcaWalletAmountRatios: Object.fromEntries(config.orcaWalletAmountRatios),
-      // Meteora
-      meteoraTargetWallets: config.meteoraTargetWallets.map(w => w.toBase58()),
-      meteoraCloseOnlyWallets: Array.from(config.meteoraCloseOnlyWallets),
-      meteoraWalletAmountRatios: Object.fromEntries(config.meteoraWalletAmountRatios),
-      // PancakeSwap
-      pcsSkipSol: config.pcsSkipSol,
-      pcsTargetWallets: config.pcsTargetWallets.map(w => w.toBase58()),
-      pcsCloseOnlyWallets: Array.from(config.pcsCloseOnlyWallets),
-      pcsWalletAmountRatios: Object.fromEntries(config.pcsWalletAmountRatios),
-      // DAMM v2
-      dammv2SkipSol: config.dammv2SkipSol,
-      dammv2TargetWallets: config.dammv2TargetWallets.map(w => w.toBase58()),
-      dammv2CloseOnlyWallets: Array.from(config.dammv2CloseOnlyWallets),
-      dammv2WalletAmountRatios: Object.fromEntries(config.dammv2WalletAmountRatios),
-    }));
+    ensureTokenNames(cfgMints).then(() =>
+      json({
+        targetWallets: config.targetWallets.map((w) => w.toBase58()),
+        closeOnlyWallets: Array.from(config.closeOnlyWallets),
+        byrealAllowSameTickWallets: Array.from(config.byrealAllowSameTickWallets),
+        byrealAllowOpenAfterOthersWallets: Array.from(config.byrealAllowOpenAfterOthersWallets),
+        byrealMaxOpenPositions: config.byrealMaxOpenPositions,
+        amountRatio: config.amountRatio,
+        walletAmountRatios: Object.fromEntries(config.walletAmountRatios),
+        skipSameTickRange: config.skipSameTickRange,
+        pumpFilterMode: config.pumpFilterMode,
+        minPoolAgeDays: config.minPoolAgeDays,
+        poolAgeWhitelist: Array.from(config.poolAgeWhitelist),
+        maxCoinConcentrationUsd: config.maxCoinConcentrationUsd,
+        maxCoinConcentrationPct: config.maxCoinConcentrationPct,
+        coinConcentrationOverrides: Array.from(config.coinConcentrationOverrides.entries()).map(
+          ([mint, v]) => ({ mint, usd: v.usd, pct: v.pct }),
+        ),
+        slippageBps: config.slippageBps,
+        maxRetry: config.maxRetry,
+        priorityFeeLamports: config.priorityFeeLamports,
+        dryRun: config.dryRun,
+        allowSameWalletReopen: config.allowSameWalletReopen,
+        drawdownThresholdPct: config.drawdownThresholdPct,
+        tokenLossStreakLimit: config.tokenLossStreakLimit,
+        tokenCooldownMinutes: config.tokenCooldownMinutes,
+        jupSwapMode: config.jupSwapMode,
+        tokenBlacklist: Array.from(config.tokenBlacklist).map((m) => ({
+          mint: m,
+          symbol: resolveTokenName(m),
+          logoURI: resolveLogoURI(m),
+        })),
+        tokenWhitelist: Array.from(config.tokenWhitelist).map((m) => ({
+          mint: m,
+          symbol: resolveTokenName(m),
+          logoURI: resolveLogoURI(m),
+        })),
+        autoClaimEnabled: config.autoClaimEnabled,
+        minPoolTvl: config.minPoolTvl,
+        tvlSource: config.tvlSource,
+        poolTvlWhitelist: Array.from(config.poolTvlWhitelist),
+        poolTvlRefreshMinutes: config.poolTvlRefreshMinutes,
+        // Skip SOL pools (per-DEX)
+        byrealSkipSol: config.byrealSkipSol,
+        orcaSkipSol: config.orcaSkipSol,
+        meteoraSkipSol: config.meteoraSkipSol,
+        // Orca
+        orcaTargetWallets: config.orcaTargetWallets.map((w) => w.toBase58()),
+        orcaCloseOnlyWallets: Array.from(config.orcaCloseOnlyWallets),
+        orcaWalletAmountRatios: Object.fromEntries(config.orcaWalletAmountRatios),
+        // Meteora
+        meteoraTargetWallets: config.meteoraTargetWallets.map((w) => w.toBase58()),
+        meteoraCloseOnlyWallets: Array.from(config.meteoraCloseOnlyWallets),
+        meteoraWalletAmountRatios: Object.fromEntries(config.meteoraWalletAmountRatios),
+        // PancakeSwap
+        pcsSkipSol: config.pcsSkipSol,
+        pcsTargetWallets: config.pcsTargetWallets.map((w) => w.toBase58()),
+        pcsCloseOnlyWallets: Array.from(config.pcsCloseOnlyWallets),
+        pcsWalletAmountRatios: Object.fromEntries(config.pcsWalletAmountRatios),
+        // DAMM v2
+        dammv2SkipSol: config.dammv2SkipSol,
+        dammv2TargetWallets: config.dammv2TargetWallets.map((w) => w.toBase58()),
+        dammv2CloseOnlyWallets: Array.from(config.dammv2CloseOnlyWallets),
+        dammv2WalletAmountRatios: Object.fromEntries(config.dammv2WalletAmountRatios),
+      }),
+    );
     return;
   }
 
@@ -948,11 +1078,13 @@ async function handleAPI(
       const pageSize = Math.min(parseInt(url.searchParams.get('pageSize') || '50'), 500);
       const page = Math.max(parseInt(url.searchParams.get('page') || '1'), 1);
       const typeFilter = url.searchParams.get('type');
-      const allowedTypes = typeFilter ? new Set(typeFilter.split(',').map(t => t.trim().toUpperCase())) : null;
+      const allowedTypes = typeFilter
+        ? new Set(typeFilter.split(',').map((t) => t.trim().toUpperCase()))
+        : null;
 
       // Filter by type if specified
       const filtered = allowedTypes
-        ? ctx.eventLog.filter(e => allowedTypes.has((e.type || '').toUpperCase()))
+        ? ctx.eventLog.filter((e) => allowedTypes.has((e.type || '').toUpperCase()))
         : ctx.eventLog;
 
       const total = filtered.length;
@@ -972,7 +1104,7 @@ async function handleAPI(
       }
       await ensureTokenNames(eventMints);
 
-      const events = pageEvents.map(e => {
+      const events = pageEvents.map((e) => {
         let poolDisplay = '';
         if (e.pool && e.pool.includes('/')) {
           const poolPart = e.pool.includes('@') ? e.pool.split('@')[0] : e.pool;
@@ -997,7 +1129,7 @@ async function handleAPI(
   // GET /api/wallet-balances (non-USDC/USDT/SOL token balances)
   if (method === 'GET' && pathname === '/api/wallet-balances') {
     const DISPLAY_EXCLUDE = new Set([
-      'So11111111111111111111111111111111111111112',  // SOL
+      'So11111111111111111111111111111111111111112', // SOL
       'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
       'Es9vMFrzaCERmKfrE1SBVYuL9sSMdCL3DscMVPR1YnG5', // USDT
       'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT Token2022
@@ -1005,41 +1137,46 @@ async function handleAPI(
     if (url.searchParams.get('refresh') === '1') {
       ctx.executor.invalidateAssetCaches();
     }
-    ctx.executor.getWalletTokenBalances().then(async (balances) => {
-      const filteredBalances = balances.filter(b => !DISPLAY_EXCLUDE.has(b.mint));
-      // Resolve token names before rendering
-      await ensureTokenNames(filteredBalances.map(b => b.mint));
-      const enriched = filteredBalances.map(b => ({
-        ...b,
-        symbol: resolveTokenName(b.mint),
-        uiAmount: rawToUi(b.amount, b.decimals),
-        logoURI: resolveLogoURI(b.mint),
-        usdcValue: null as number | null,
-      }));
-      // Fetch USD prices from Jupiter Price API
-      if (enriched.length > 0 && config.jupApiKey) {
-        try {
-          const mints = enriched.map(b => b.mint).join(',');
-          const priceRes = await fetch(`https://api.jup.ag/price/v3?ids=${mints}`, {
-            headers: { 'x-api-key': config.jupApiKey },
-          });
-          if (priceRes.ok) {
-            const priceData = await priceRes.json() as Record<string, any>;
-            for (const b of enriched) {
-              const p = priceData?.[b.mint]?.usdPrice;
-              if (p && b.uiAmount) {
-                b.usdcValue = parseFloat(String(p)) * parseFloat(b.uiAmount);
+    ctx.executor
+      .getWalletTokenBalances()
+      .then(async (balances) => {
+        const filteredBalances = balances.filter((b) => !DISPLAY_EXCLUDE.has(b.mint));
+        // Resolve token names before rendering
+        await ensureTokenNames(filteredBalances.map((b) => b.mint));
+        const enriched = filteredBalances.map((b) => ({
+          ...b,
+          symbol: resolveTokenName(b.mint),
+          uiAmount: rawToUi(b.amount, b.decimals),
+          logoURI: resolveLogoURI(b.mint),
+          usdcValue: null as number | null,
+        }));
+        // Fetch USD prices from Jupiter Price API
+        if (enriched.length > 0 && config.jupApiKey) {
+          try {
+            const mints = enriched.map((b) => b.mint).join(',');
+            const priceRes = await fetch(`https://api.jup.ag/price/v3?ids=${mints}`, {
+              headers: { 'x-api-key': config.jupApiKey },
+            });
+            if (priceRes.ok) {
+              const priceData = (await priceRes.json()) as Record<string, any>;
+              for (const b of enriched) {
+                const p = priceData?.[b.mint]?.usdPrice;
+                if (p && b.uiAmount) {
+                  b.usdcValue = parseFloat(String(p)) * parseFloat(b.uiAmount);
+                }
               }
             }
+          } catch {
+            /* price fetch failed — return balances without USDC value */
           }
-        } catch { /* price fetch failed — return balances without USDC value */ }
-      }
-      enriched.sort((a, b) => (a.usdcValue || 0) - (b.usdcValue || 0));
-      json(enriched);
-    }).catch(err => {
-      logger.warn(MODULE, `Wallet balances error: ${err.message}`);
-      json({ error: err.message }, 500);
-    });
+        }
+        enriched.sort((a, b) => (a.usdcValue || 0) - (b.usdcValue || 0));
+        json(enriched);
+      })
+      .catch((err) => {
+        logger.warn(MODULE, `Wallet balances error: ${err.message}`);
+        json({ error: err.message }, 500);
+      });
     return;
   }
 
@@ -1053,23 +1190,25 @@ async function handleAPI(
       try {
         const byrealItems = await ctx.executor.getPositionAssets();
         const orcaItems = ctx.orcaExecutor ? await ctx.orcaExecutor.getPositionAssets() : [];
-        const meteoraItems = ctx.meteoraExecutor ? await ctx.meteoraExecutor.getPositionAssets() : [];
+        const meteoraItems = ctx.meteoraExecutor
+          ? await ctx.meteoraExecutor.getPositionAssets()
+          : [];
         const pcsItems = ctx.pcsExecutor ? await ctx.pcsExecutor.getPositionAssets() : [];
         const dammv2Items = ctx.dammv2Executor ? await ctx.dammv2Executor.getPositionAssets() : [];
         // Merge: tag each item with dex, combine into one list
         const lpItems = [
-          ...byrealItems.map(i => ({ ...i, dex: 'byreal' as const })),
-          ...orcaItems.map(i => ({ ...i, dex: 'orca' as const })),
-          ...meteoraItems.map(i => ({ ...i, dex: 'meteora' as const })),
-          ...pcsItems.map(i => ({ ...i, dex: 'pancakeswap' as const })),
-          ...dammv2Items.map(i => ({ ...i, dex: 'dammv2' as const })),
+          ...byrealItems.map((i) => ({ ...i, dex: 'byreal' as const })),
+          ...orcaItems.map((i) => ({ ...i, dex: 'orca' as const })),
+          ...meteoraItems.map((i) => ({ ...i, dex: 'meteora' as const })),
+          ...pcsItems.map((i) => ({ ...i, dex: 'pancakeswap' as const })),
+          ...dammv2Items.map((i) => ({ ...i, dex: 'dammv2' as const })),
         ];
         if (lpItems.length === 0) {
           return json({ items: [], total: 0 });
         }
 
         // Resolve token names for all LP item mints + paired stable mints
-        const allLpMints: string[] = lpItems.map(i => i.mint);
+        const allLpMints: string[] = lpItems.map((i) => i.mint);
         for (const i of lpItems) {
           for (const m of Object.keys(i.pairedStable)) if (m) allLpMints.push(m);
         }
@@ -1079,34 +1218,38 @@ async function handleAPI(
         const prices: Record<string, number> = {};
         if (config.jupApiKey) {
           try {
-            const mints = lpItems.map(i => i.mint).join(',');
+            const mints = lpItems.map((i) => i.mint).join(',');
             const priceRes = await fetch(`https://api.jup.ag/price/v3?ids=${mints}`, {
               headers: { 'x-api-key': config.jupApiKey },
             });
             if (priceRes.ok) {
-              const priceData = await priceRes.json() as any;
+              const priceData = (await priceRes.json()) as any;
               for (const [mint, info] of Object.entries(priceData)) {
                 const p = (info as any)?.usdPrice;
                 if (p) prices[mint] = parseFloat(String(p));
               }
             }
-          } catch { /* prices unavailable */ }
+          } catch {
+            /* prices unavailable */
+          }
         }
 
         // Resolve TVL for all unique mints (respects tvlSource setting)
-        const uniqueMints = [...new Set(lpItems.map(i => i.mint))];
+        const uniqueMints = [...new Set(lpItems.map((i) => i.mint))];
         const tvlMap: Record<string, number | null> = {};
-        await Promise.all(uniqueMints.map(async (mint) => {
-          tvlMap[mint] = await checkTokenLiquidity(mint);
-        }));
+        await Promise.all(
+          uniqueMints.map(async (mint) => {
+            tvlMap[mint] = await checkTokenLiquidity(mint);
+          }),
+        );
 
-        const items = lpItems.map(i => {
+        const items = lpItems.map((i) => {
           const price = prices[i.mint] ?? null;
           // Convert pairedStable mint addresses → symbol:amount pairs for display
           const pairedStable: Record<string, number> = {};
           for (const [stableMint, amount] of Object.entries(i.pairedStable)) {
             const sym = resolveTokenName(stableMint);
-            pairedStable[sym] = +(((pairedStable[sym] ?? 0) + amount).toFixed(4));
+            pairedStable[sym] = +((pairedStable[sym] ?? 0) + amount).toFixed(4);
           }
           return {
             mint: i.mint,
@@ -1146,8 +1289,8 @@ async function handleAPI(
   // GET /api/swap-history
   if (method === 'GET' && pathname === '/api/swap-history') {
     (async () => {
-      await ensureTokenNames(ctx.swapHistory.map(s => s.inputMint));
-      const enriched = ctx.swapHistory.map(s => {
+      await ensureTokenNames(ctx.swapHistory.map((s) => s.inputMint));
+      const enriched = ctx.swapHistory.map((s) => {
         const decimals = s.inputDecimals ?? resolveDecimals(s.inputMint);
         return {
           ...s,
@@ -1170,7 +1313,7 @@ async function handleAPI(
       const enriched: Record<string, any> = {};
       for (const [mint, data] of Object.entries(raw)) {
         enriched[mint] = {
-          ...data as any,
+          ...(data as any),
           symbol: resolveTokenName(mint),
           logoURI: resolveLogoURI(mint),
         };
@@ -1204,7 +1347,55 @@ async function handleAPI(
   if (method === 'PATCH' && pathname === '/api/config') {
     return readBody(req, (body) => {
       try {
-        const { targetWallets, closeOnlyWallets, byrealAllowSameTickWallets, byrealAllowOpenAfterOthersWallets, byrealMaxOpenPositions, amountRatio, walletAmountRatios, skipSameTickRange, pumpFilterMode, minPoolAgeDays, poolAgeWhitelist, maxCoinConcentrationUsd, maxCoinConcentrationPct, coinConcentrationOverrides, slippageBps, maxRetry, priorityFeeLamports, dryRun, allowSameWalletReopen, drawdownThresholdPct, tokenLossStreakLimit, tokenCooldownMinutes, jupSwapMode, tokenBlacklist, tokenWhitelist, autoClaimEnabled, minPoolTvl, tvlSource, poolTvlWhitelist, poolTvlRefreshMinutes, byrealSkipSol, orcaSkipSol, meteoraSkipSol, pcsSkipSol, orcaTargetWallets, orcaCloseOnlyWallets, orcaWalletAmountRatios, meteoraTargetWallets, meteoraCloseOnlyWallets, meteoraWalletAmountRatios, pcsTargetWallets, pcsCloseOnlyWallets, pcsWalletAmountRatios, dammv2SkipSol, dammv2TargetWallets, dammv2CloseOnlyWallets, dammv2WalletAmountRatios } = body;
+        const {
+          targetWallets,
+          closeOnlyWallets,
+          byrealAllowSameTickWallets,
+          byrealAllowOpenAfterOthersWallets,
+          byrealMaxOpenPositions,
+          amountRatio,
+          walletAmountRatios,
+          skipSameTickRange,
+          pumpFilterMode,
+          minPoolAgeDays,
+          poolAgeWhitelist,
+          maxCoinConcentrationUsd,
+          maxCoinConcentrationPct,
+          coinConcentrationOverrides,
+          slippageBps,
+          maxRetry,
+          priorityFeeLamports,
+          dryRun,
+          allowSameWalletReopen,
+          drawdownThresholdPct,
+          tokenLossStreakLimit,
+          tokenCooldownMinutes,
+          jupSwapMode,
+          tokenBlacklist,
+          tokenWhitelist,
+          autoClaimEnabled,
+          minPoolTvl,
+          tvlSource,
+          poolTvlWhitelist,
+          poolTvlRefreshMinutes,
+          byrealSkipSol,
+          orcaSkipSol,
+          meteoraSkipSol,
+          pcsSkipSol,
+          orcaTargetWallets,
+          orcaCloseOnlyWallets,
+          orcaWalletAmountRatios,
+          meteoraTargetWallets,
+          meteoraCloseOnlyWallets,
+          meteoraWalletAmountRatios,
+          pcsTargetWallets,
+          pcsCloseOnlyWallets,
+          pcsWalletAmountRatios,
+          dammv2SkipSol,
+          dammv2TargetWallets,
+          dammv2CloseOnlyWallets,
+          dammv2WalletAmountRatios,
+        } = body;
         if (!Array.isArray(targetWallets) || targetWallets.length === 0) {
           return json({ error: '至少需要一個目標錢包' }, 400);
         }
@@ -1212,8 +1403,11 @@ async function handleAPI(
         // Validate addresses
         const newTargets: PublicKey[] = [];
         for (const addr of targetWallets) {
-          try { newTargets.push(new PublicKey(addr.trim())); }
-          catch { return json({ error: `無效地址: ${addr}` }, 400); }
+          try {
+            newTargets.push(new PublicKey(addr.trim()));
+          } catch {
+            return json({ error: `無效地址: ${addr}` }, 400);
+          }
         }
 
         const newCloseOnly = new Set<string>();
@@ -1238,12 +1432,15 @@ async function handleAPI(
           for (const addr of byrealAllowSameTickWallets) {
             const trimmed = String(addr).trim();
             if (!trimmed) continue;
-            try { new PublicKey(trimmed); }
-            catch { return json({ error: `無效地址: ${trimmed}` }, 400); }
+            try {
+              new PublicKey(trimmed);
+            } catch {
+              return json({ error: `無效地址: ${trimmed}` }, 400);
+            }
           }
           normalizedAllowSameTick = normalizeByrealAllowSameTickWallets(
             byrealAllowSameTickWallets,
-            newTargets.map(t => t.toBase58()),
+            newTargets.map((t) => t.toBase58()),
           );
           config.byrealAllowSameTickWallets.clear();
           for (const addr of normalizedAllowSameTick) config.byrealAllowSameTickWallets.add(addr);
@@ -1257,15 +1454,19 @@ async function handleAPI(
           for (const addr of byrealAllowOpenAfterOthersWallets) {
             const trimmed = String(addr).trim();
             if (!trimmed) continue;
-            try { new PublicKey(trimmed); }
-            catch { return json({ error: `?⊥??啣?: ${trimmed}` }, 400); }
+            try {
+              new PublicKey(trimmed);
+            } catch {
+              return json({ error: `?⊥??啣?: ${trimmed}` }, 400);
+            }
           }
           normalizedAllowOpenAfterOthers = normalizeByrealAllowSameTickWallets(
             byrealAllowOpenAfterOthersWallets,
-            newTargets.map(t => t.toBase58()),
+            newTargets.map((t) => t.toBase58()),
           );
           config.byrealAllowOpenAfterOthersWallets.clear();
-          for (const addr of normalizedAllowOpenAfterOthers) config.byrealAllowOpenAfterOthersWallets.add(addr);
+          for (const addr of normalizedAllowOpenAfterOthers)
+            config.byrealAllowOpenAfterOthersWallets.add(addr);
         }
 
         // Apply per-wallet ratio overrides FIRST so TARGET_WALLETS serialization reflects them
@@ -1280,36 +1481,52 @@ async function handleAPI(
         // Update in-memory config — strategy
         const envUpdates: Record<string, string> = {
           // Serialize per-wallet ratios into TARGET_WALLETS as "addr:ratio" entries
-          TARGET_WALLETS: newTargets.map(t => {
-            const addr = t.toBase58();
-            const ratio = config.walletAmountRatios.get(addr);
-            return ratio !== undefined ? `${addr}:${ratio}` : addr;
-          }).join(','),
+          TARGET_WALLETS: newTargets
+            .map((t) => {
+              const addr = t.toBase58();
+              const ratio = config.walletAmountRatios.get(addr);
+              return ratio !== undefined ? `${addr}:${ratio}` : addr;
+            })
+            .join(','),
           CLOSE_ONLY_WALLETS: Array.from(newCloseOnly).join(','),
         };
         if (byrealAllowSameTickWallets !== undefined) {
           envUpdates.BYREAL_ALLOW_SAME_TICK_WALLETS = serializeWalletSet(normalizedAllowSameTick);
         }
         if (byrealAllowOpenAfterOthersWallets !== undefined) {
-          envUpdates.BYREAL_ALLOW_OPEN_AFTER_OTHERS_WALLETS = serializeWalletSet(normalizedAllowOpenAfterOthers);
+          envUpdates.BYREAL_ALLOW_OPEN_AFTER_OTHERS_WALLETS = serializeWalletSet(
+            normalizedAllowOpenAfterOthers,
+          );
         }
         applyByrealMaxOpenPositionsConfig({ byrealMaxOpenPositions }, config, envUpdates);
 
         if (amountRatio !== undefined) {
           const val = parseFloat(amountRatio);
-          if (!isNaN(val) && val > 0) { config.amountRatio = val; envUpdates.AMOUNT_RATIO = val.toString(); }
+          if (!isNaN(val) && val > 0) {
+            config.amountRatio = val;
+            envUpdates.AMOUNT_RATIO = val.toString();
+          }
         }
         if (slippageBps !== undefined) {
           const val = parseInt(slippageBps);
-          if (!isNaN(val) && val > 0) { config.slippageBps = val; envUpdates.SLIPPAGE_BPS = val.toString(); }
+          if (!isNaN(val) && val > 0) {
+            config.slippageBps = val;
+            envUpdates.SLIPPAGE_BPS = val.toString();
+          }
         }
         if (maxRetry !== undefined) {
           const val = parseInt(maxRetry);
-          if (!isNaN(val) && val > 0) { config.maxRetry = val; envUpdates.MAX_RETRY = val.toString(); }
+          if (!isNaN(val) && val > 0) {
+            config.maxRetry = val;
+            envUpdates.MAX_RETRY = val.toString();
+          }
         }
         if (priorityFeeLamports !== undefined) {
           const val = parseInt(priorityFeeLamports);
-          if (!isNaN(val) && val >= 0) { config.priorityFeeLamports = val; envUpdates.PRIORITY_FEE_LAMPORTS = val.toString(); }
+          if (!isNaN(val) && val >= 0) {
+            config.priorityFeeLamports = val;
+            envUpdates.PRIORITY_FEE_LAMPORTS = val.toString();
+          }
         }
         if (dryRun !== undefined) {
           const val = dryRun === true || dryRun === 'true';
@@ -1326,7 +1543,10 @@ async function handleAPI(
           config.skipSameTickRange = val;
           envUpdates.SKIP_SAME_TICK_RANGE = val.toString();
         }
-        if (pumpFilterMode !== undefined && (pumpFilterMode === 'off' || pumpFilterMode === 'full' || pumpFilterMode === 'discord')) {
+        if (
+          pumpFilterMode !== undefined &&
+          (pumpFilterMode === 'off' || pumpFilterMode === 'full' || pumpFilterMode === 'discord')
+        ) {
           const oldMode = config.pumpFilterMode;
           config.pumpFilterMode = pumpFilterMode;
           envUpdates.PUMP_FILTER_MODE = pumpFilterMode;
@@ -1365,15 +1585,24 @@ async function handleAPI(
         // Risk management
         if (drawdownThresholdPct !== undefined) {
           const val = parseFloat(drawdownThresholdPct);
-          if (!isNaN(val) && val >= 0) { config.drawdownThresholdPct = val; envUpdates.DRAWDOWN_THRESHOLD_PCT = val.toString(); }
+          if (!isNaN(val) && val >= 0) {
+            config.drawdownThresholdPct = val;
+            envUpdates.DRAWDOWN_THRESHOLD_PCT = val.toString();
+          }
         }
         if (tokenLossStreakLimit !== undefined) {
           const val = parseInt(tokenLossStreakLimit);
-          if (!isNaN(val) && val >= 0) { config.tokenLossStreakLimit = val; envUpdates.TOKEN_LOSS_STREAK_LIMIT = val.toString(); }
+          if (!isNaN(val) && val >= 0) {
+            config.tokenLossStreakLimit = val;
+            envUpdates.TOKEN_LOSS_STREAK_LIMIT = val.toString();
+          }
         }
         if (tokenCooldownMinutes !== undefined) {
           const val = parseInt(tokenCooldownMinutes);
-          if (!isNaN(val) && val >= 0) { config.tokenCooldownMinutes = val; envUpdates.TOKEN_COOLDOWN_MINUTES = val.toString(); }
+          if (!isNaN(val) && val >= 0) {
+            config.tokenCooldownMinutes = val;
+            envUpdates.TOKEN_COOLDOWN_MINUTES = val.toString();
+          }
         }
         if (jupSwapMode !== undefined && (jupSwapMode === 'metis' || jupSwapMode === 'ultra')) {
           config.jupSwapMode = jupSwapMode;
@@ -1382,13 +1611,17 @@ async function handleAPI(
 
         // Token blacklist / whitelist
         if (Array.isArray(tokenBlacklist)) {
-          const newBL = new Set(tokenBlacklist.map((s: string) => s.trim()).filter((s: string) => s.length > 0));
+          const newBL = new Set(
+            tokenBlacklist.map((s: string) => s.trim()).filter((s: string) => s.length > 0),
+          );
           config.tokenBlacklist.clear();
           for (const m of newBL) config.tokenBlacklist.add(m);
           envUpdates.TOKEN_BLACKLIST = Array.from(newBL).join(',');
         }
         if (Array.isArray(tokenWhitelist)) {
-          const newWL = new Set(tokenWhitelist.map((s: string) => s.trim()).filter((s: string) => s.length > 0));
+          const newWL = new Set(
+            tokenWhitelist.map((s: string) => s.trim()).filter((s: string) => s.length > 0),
+          );
           config.tokenWhitelist.clear();
           for (const m of newWL) config.tokenWhitelist.add(m);
           envUpdates.TOKEN_WHITELIST = Array.from(newWL).join(',');
@@ -1436,14 +1669,19 @@ async function handleAPI(
         // Pool TVL filter
         if (minPoolTvl !== undefined) {
           const val = parseFloat(minPoolTvl);
-          if (!isNaN(val) && val >= 0) { config.minPoolTvl = val; envUpdates.MIN_POOL_TVL = val.toString(); }
+          if (!isNaN(val) && val >= 0) {
+            config.minPoolTvl = val;
+            envUpdates.MIN_POOL_TVL = val.toString();
+          }
         }
         if (tvlSource === 'dex' || tvlSource === 'jupiter') {
           config.tvlSource = tvlSource;
           envUpdates.TVL_SOURCE = tvlSource;
         }
         if (Array.isArray(poolTvlWhitelist)) {
-          const newWL = new Set<string>(poolTvlWhitelist.map((s: string) => s.trim()).filter((s: string) => s.length > 0));
+          const newWL = new Set<string>(
+            poolTvlWhitelist.map((s: string) => s.trim()).filter((s: string) => s.length > 0),
+          );
           config.poolTvlWhitelist.clear();
           for (const m of newWL) config.poolTvlWhitelist.add(m);
           envUpdates.POOL_TVL_WHITELIST = Array.from(newWL).join(',');
@@ -1461,8 +1699,11 @@ async function handleAPI(
         if (Array.isArray(orcaTargetWallets)) {
           const newOrcaTargets: PublicKey[] = [];
           for (const addr of orcaTargetWallets) {
-            try { newOrcaTargets.push(new PublicKey(addr.trim())); }
-            catch { /* skip invalid */ }
+            try {
+              newOrcaTargets.push(new PublicKey(addr.trim()));
+            } catch {
+              /* skip invalid */
+            }
           }
           config.orcaTargetWallets.length = 0;
           for (const t of newOrcaTargets) config.orcaTargetWallets.push(t);
@@ -1476,11 +1717,13 @@ async function handleAPI(
             }
           }
 
-          envUpdates.ORCA_TARGET_WALLETS = newOrcaTargets.map(t => {
-            const addr = t.toBase58();
-            const ratio = config.orcaWalletAmountRatios.get(addr);
-            return ratio !== undefined ? `${addr}:${ratio}` : addr;
-          }).join(',');
+          envUpdates.ORCA_TARGET_WALLETS = newOrcaTargets
+            .map((t) => {
+              const addr = t.toBase58();
+              const ratio = config.orcaWalletAmountRatios.get(addr);
+              return ratio !== undefined ? `${addr}:${ratio}` : addr;
+            })
+            .join(',');
         }
         if (Array.isArray(orcaCloseOnlyWallets)) {
           const newOrcaCloseOnly = new Set<string>();
@@ -1497,26 +1740,35 @@ async function handleAPI(
         if (Array.isArray(meteoraTargetWallets)) {
           const newMeteoraTargets: PublicKey[] = [];
           for (const addr of meteoraTargetWallets) {
-            try { newMeteoraTargets.push(new PublicKey(addr.trim())); }
-            catch { /* skip invalid */ }
+            try {
+              newMeteoraTargets.push(new PublicKey(addr.trim()));
+            } catch {
+              /* skip invalid */
+            }
           }
           config.meteoraTargetWallets.length = 0;
           for (const t of newMeteoraTargets) config.meteoraTargetWallets.push(t);
           (config as any).meteoraEnabled = newMeteoraTargets.length > 0;
 
-          if (meteoraWalletAmountRatios !== undefined && typeof meteoraWalletAmountRatios === 'object') {
+          if (
+            meteoraWalletAmountRatios !== undefined &&
+            typeof meteoraWalletAmountRatios === 'object'
+          ) {
             config.meteoraWalletAmountRatios.clear();
             for (const [addr, val] of Object.entries(meteoraWalletAmountRatios)) {
               const ratio = parseFloat(String(val));
-              if (!isNaN(ratio) && ratio > 0) config.meteoraWalletAmountRatios.set(addr.trim(), ratio);
+              if (!isNaN(ratio) && ratio > 0)
+                config.meteoraWalletAmountRatios.set(addr.trim(), ratio);
             }
           }
 
-          envUpdates.METEORA_TARGET_WALLETS = newMeteoraTargets.map(t => {
-            const addr = t.toBase58();
-            const ratio = config.meteoraWalletAmountRatios.get(addr);
-            return ratio !== undefined ? `${addr}:${ratio}` : addr;
-          }).join(',');
+          envUpdates.METEORA_TARGET_WALLETS = newMeteoraTargets
+            .map((t) => {
+              const addr = t.toBase58();
+              const ratio = config.meteoraWalletAmountRatios.get(addr);
+              return ratio !== undefined ? `${addr}:${ratio}` : addr;
+            })
+            .join(',');
         }
         if (Array.isArray(meteoraCloseOnlyWallets)) {
           const newMeteoraCloseOnly = new Set<string>();
@@ -1533,8 +1785,11 @@ async function handleAPI(
         if (Array.isArray(pcsTargetWallets)) {
           const newPcsTargets: PublicKey[] = [];
           for (const addr of pcsTargetWallets) {
-            try { newPcsTargets.push(new PublicKey(addr.trim())); }
-            catch { /* skip invalid */ }
+            try {
+              newPcsTargets.push(new PublicKey(addr.trim()));
+            } catch {
+              /* skip invalid */
+            }
           }
           config.pcsTargetWallets.length = 0;
           for (const t of newPcsTargets) config.pcsTargetWallets.push(t);
@@ -1548,11 +1803,13 @@ async function handleAPI(
             }
           }
 
-          envUpdates.PCS_TARGET_WALLETS = newPcsTargets.map(t => {
-            const addr = t.toBase58();
-            const ratio = config.pcsWalletAmountRatios.get(addr);
-            return ratio !== undefined ? `${addr}:${ratio}` : addr;
-          }).join(',');
+          envUpdates.PCS_TARGET_WALLETS = newPcsTargets
+            .map((t) => {
+              const addr = t.toBase58();
+              const ratio = config.pcsWalletAmountRatios.get(addr);
+              return ratio !== undefined ? `${addr}:${ratio}` : addr;
+            })
+            .join(',');
         }
         if (Array.isArray(pcsCloseOnlyWallets)) {
           const newPcsCloseOnly = new Set<string>();
@@ -1569,26 +1826,35 @@ async function handleAPI(
         if (Array.isArray(dammv2TargetWallets)) {
           const newDammv2Targets: PublicKey[] = [];
           for (const addr of dammv2TargetWallets) {
-            try { newDammv2Targets.push(new PublicKey(addr.trim())); }
-            catch { /* skip invalid */ }
+            try {
+              newDammv2Targets.push(new PublicKey(addr.trim()));
+            } catch {
+              /* skip invalid */
+            }
           }
           config.dammv2TargetWallets.length = 0;
           for (const t of newDammv2Targets) config.dammv2TargetWallets.push(t);
           (config as any).dammv2Enabled = newDammv2Targets.length > 0;
 
-          if (dammv2WalletAmountRatios !== undefined && typeof dammv2WalletAmountRatios === 'object') {
+          if (
+            dammv2WalletAmountRatios !== undefined &&
+            typeof dammv2WalletAmountRatios === 'object'
+          ) {
             config.dammv2WalletAmountRatios.clear();
             for (const [addr, val] of Object.entries(dammv2WalletAmountRatios)) {
               const ratio = parseFloat(String(val));
-              if (!isNaN(ratio) && ratio > 0) config.dammv2WalletAmountRatios.set(addr.trim(), ratio);
+              if (!isNaN(ratio) && ratio > 0)
+                config.dammv2WalletAmountRatios.set(addr.trim(), ratio);
             }
           }
 
-          envUpdates.DAMMV2_TARGET_WALLETS = newDammv2Targets.map(t => {
-            const addr = t.toBase58();
-            const ratio = config.dammv2WalletAmountRatios.get(addr);
-            return ratio !== undefined ? `${addr}:${ratio}` : addr;
-          }).join(',');
+          envUpdates.DAMMV2_TARGET_WALLETS = newDammv2Targets
+            .map((t) => {
+              const addr = t.toBase58();
+              const ratio = config.dammv2WalletAmountRatios.get(addr);
+              return ratio !== undefined ? `${addr}:${ratio}` : addr;
+            })
+            .join(',');
         }
         if (Array.isArray(dammv2CloseOnlyWallets)) {
           const newDammv2CloseOnly = new Set<string>();
@@ -1605,11 +1871,14 @@ async function handleAPI(
         updateEnvFile(envUpdates);
 
         // Resubscribe WebSocket
-        ctx.monitor.resubscribe().catch(err => {
+        ctx.monitor.resubscribe().catch((err) => {
           logger.error(MODULE, `Resubscribe error: ${err.message}`);
         });
 
-        logger.info(MODULE, `Config updated: ${newTargets.length} targets, ratio=${config.amountRatio}, slippage=${config.slippageBps}, dryRun=${config.dryRun}`);
+        logger.info(
+          MODULE,
+          `Config updated: ${newTargets.length} targets, ratio=${config.amountRatio}, slippage=${config.slippageBps}, dryRun=${config.dryRun}`,
+        );
         return json({ ok: true, message: '設定已儲存（即時生效）' });
       } catch (err: any) {
         return json({ error: err.message }, 500);
@@ -1624,7 +1893,14 @@ async function handleAPI(
     (async () => {
       const info = getTvlCacheInfo();
       const tvl = await checkTokenLiquidity(mint);
-      json({ mint, tvl, found: tvl !== null, source: config.tvlSource, lastFetchAt: info.lastFetchAt, cacheSize: info.size });
+      json({
+        mint,
+        tvl,
+        found: tvl !== null,
+        source: config.tvlSource,
+        lastFetchAt: info.lastFetchAt,
+        cacheSize: info.size,
+      });
     })();
     return;
   }
@@ -1636,7 +1912,7 @@ async function handleAPI(
         const info = getTvlCacheInfo();
         json({ ok: true, cacheSize: info.size, lastFetchAt: info.lastFetchAt });
       })
-      .catch(err => json({ error: err.message }, 500));
+      .catch((err) => json({ error: err.message }, 500));
     return;
   }
 
@@ -1654,38 +1930,69 @@ async function handleAPI(
     const currentVersion = pkg.version;
     try {
       // Auto-install git if missing
-      try { execSync('git --version', { timeout: 5000 }); }
-      catch {
+      try {
+        execSync('git --version', { timeout: 5000 });
+      } catch {
         logger.info(MODULE, 'Git not found, auto-installing...');
-        try { execSync('apt-get update -qq && apt-get install -y -qq git', { timeout: 120000 }); }
-        catch { return json({ currentVersion, latestVersion: currentVersion, error: 'Git 自動安裝失敗（需手動執行: sudo apt install git -y）' }); }
+        try {
+          execSync('apt-get update -qq && apt-get install -y -qq git', { timeout: 120000 });
+        } catch {
+          return json({
+            currentVersion,
+            latestVersion: currentVersion,
+            error: 'Git 自動安裝失敗（需手動執行: sudo apt install git -y）',
+          });
+        }
       }
       // Auto-init git repo if missing
-      try { execSync('git rev-parse --git-dir', { cwd: process.cwd(), timeout: 5000 }); }
-      catch {
+      try {
+        execSync('git rev-parse --git-dir', { cwd: process.cwd(), timeout: 5000 });
+      } catch {
         logger.info(MODULE, 'Git repo not initialized, auto-init...');
         try {
-          execSync('git init && git remote add origin https://github.com/zxcnny930/byreal-copy-bot.git', { cwd: process.cwd(), timeout: 10000 });
-        } catch { return json({ currentVersion, latestVersion: currentVersion, error: 'Git 初始化失敗' }); }
+          execSync(
+            'git init && git remote add origin https://github.com/zxcnny930/byreal-copy-bot.git',
+            { cwd: process.cwd(), timeout: 10000 },
+          );
+        } catch {
+          return json({ currentVersion, latestVersion: currentVersion, error: 'Git 初始化失敗' });
+        }
       }
 
       // Fetch latest from origin
-      try { execSync('git fetch origin main --quiet', { cwd: process.cwd(), timeout: 30000 }); }
-      catch { return json({ currentVersion, latestVersion: currentVersion, error: '無法連線到更新伺服器（git fetch 失敗）' }); }
+      try {
+        execSync('git fetch origin main --quiet', { cwd: process.cwd(), timeout: 30000 });
+      } catch {
+        return json({
+          currentVersion,
+          latestVersion: currentVersion,
+          error: '無法連線到更新伺服器（git fetch 失敗）',
+        });
+      }
 
       // Read remote package.json version
       let latestVersion = currentVersion;
       let changelog = '';
       try {
-        const remotePkg = execSync('git show origin/main:package.json', { cwd: process.cwd(), timeout: 5000 }).toString();
+        const remotePkg = execSync('git show origin/main:package.json', {
+          cwd: process.cwd(),
+          timeout: 5000,
+        }).toString();
         latestVersion = JSON.parse(remotePkg).version || currentVersion;
-      } catch { /* remote package.json not found */ }
+      } catch {
+        /* remote package.json not found */
+      }
 
       // Read remote CHANGELOG.md (first 3000 chars)
       try {
-        const remoteChangelog = execSync('git show origin/main:CHANGELOG.md', { cwd: process.cwd(), timeout: 5000 }).toString();
+        const remoteChangelog = execSync('git show origin/main:CHANGELOG.md', {
+          cwd: process.cwd(),
+          timeout: 5000,
+        }).toString();
         changelog = remoteChangelog.slice(0, 3000);
-      } catch { /* no changelog */ }
+      } catch {
+        /* no changelog */
+      }
 
       const hasUpdate = latestVersion !== currentVersion;
       return json({ currentVersion, latestVersion, hasUpdate, changelog });
@@ -1705,7 +2012,12 @@ async function handleAPI(
       steps.push('OK');
 
       steps.push('> git reset --hard origin/main');
-      const resetOut = execSync('git reset --hard origin/main', { cwd: process.cwd(), timeout: 10000 }).toString().trim();
+      const resetOut = execSync('git reset --hard origin/main', {
+        cwd: process.cwd(),
+        timeout: 10000,
+      })
+        .toString()
+        .trim();
       steps.push(resetOut);
 
       // Step 2: npm install
@@ -1742,7 +2054,8 @@ async function handleAPI(
   if (method === 'POST' && pathname === '/api/actions/manual-open') {
     return readBody(req, async (body) => {
       const { targetNft, poolAddress, targetWallet, dex } = body;
-      if (!targetNft || !poolAddress || !targetWallet) return json({ error: 'targetNft, poolAddress, targetWallet required' }, 400);
+      if (!targetNft || !poolAddress || !targetWallet)
+        return json({ error: 'targetNft, poolAddress, targetWallet required' }, 400);
       try {
         const sig = await ctx.opQueue.executeNow(`manual-open(${targetNft.slice(0, 8)})`, () => {
           if (dex === 'orca' && ctx.orcaExecutor) {
@@ -1774,15 +2087,20 @@ async function handleAPI(
   // POST /api/actions/claim-now — manual trigger for copy bonus claim
   if (method === 'POST' && pathname === '/api/actions/claim-now') {
     logger.info(MODULE, '手動領取複製獎勵觸發');
-    claimCopyBonus().then(result => {
-      if (result.error) {
-        logger.warn(MODULE, `手動領取結果: ${result.error}`);
-      } else {
-        logger.info(MODULE, `手動領取完成: ${result.totalPools} pools, ${result.txSignatures.length} txs`);
-      }
-    }).catch(err => {
-      logger.error(MODULE, `手動領取錯誤: ${err.message}`);
-    });
+    claimCopyBonus()
+      .then((result) => {
+        if (result.error) {
+          logger.warn(MODULE, `手動領取結果: ${result.error}`);
+        } else {
+          logger.info(
+            MODULE,
+            `手動領取完成: ${result.totalPools} pools, ${result.txSignatures.length} txs`,
+          );
+        }
+      })
+      .catch((err) => {
+        logger.error(MODULE, `手動領取錯誤: ${err.message}`);
+      });
     return json({ ok: true, message: '領取已觸發，請查看日誌' });
   }
 
@@ -1820,7 +2138,10 @@ async function handleAPI(
           return json({ ok: true, txSig: sig, message: '關倉成功' });
         }
         if (targetNft && !ctx.positionMap.findByOurNft(ourNftMint)) {
-          return json({ ok: true, message: 'Position already gone on-chain; local mapping removed' });
+          return json({
+            ok: true,
+            message: 'Position already gone on-chain; local mapping removed',
+          });
         }
         if (isOrca && !ctx.orcaExecutor) {
           return json({ ok: false, message: 'Orca 執行器未啟用，無法關閉 Orca 倉位' });
@@ -1846,7 +2167,8 @@ async function handleAPI(
   if (method === 'POST' && pathname === '/api/actions/batch-close') {
     return readBody(req, async (body) => {
       const { nftMints } = body;
-      if (!Array.isArray(nftMints) || nftMints.length === 0) return json({ error: 'nftMints[] required' }, 400);
+      if (!Array.isArray(nftMints) || nftMints.length === 0)
+        return json({ error: 'nftMints[] required' }, 400);
       if (nftMints.length > 50) return json({ error: '最多 50 個倉位' }, 400);
 
       const results: { nft: string; ok: boolean; txSig?: string; message: string }[] = [];
@@ -1855,14 +2177,22 @@ async function handleAPI(
           const targetNft = ctx.positionMap.findByOurNft(ourNft);
           const dex = targetNft ? ctx.positionMap.getDex(targetNft) : undefined;
           const sig = await ctx.opQueue.executeNow(`batch-close(${ourNft.slice(0, 8)})`, () => {
-            if (dex === 'orca' && ctx.orcaExecutor) return ctx.orcaExecutor.manualClosePosition(ourNft);
-            if (dex === 'meteora' && ctx.meteoraExecutor) return ctx.meteoraExecutor.manualClosePosition(ourNft);
-            if (dex === 'pancakeswap' && ctx.pcsExecutor) return ctx.pcsExecutor.manualClosePosition(ourNft);
-            if (dex === 'dammv2' && ctx.dammv2Executor) return ctx.dammv2Executor.manualClosePosition(ourNft);
+            if (dex === 'orca' && ctx.orcaExecutor)
+              return ctx.orcaExecutor.manualClosePosition(ourNft);
+            if (dex === 'meteora' && ctx.meteoraExecutor)
+              return ctx.meteoraExecutor.manualClosePosition(ourNft);
+            if (dex === 'pancakeswap' && ctx.pcsExecutor)
+              return ctx.pcsExecutor.manualClosePosition(ourNft);
+            if (dex === 'dammv2' && ctx.dammv2Executor)
+              return ctx.dammv2Executor.manualClosePosition(ourNft);
             return ctx.executor.manualClosePosition(ourNft);
           });
           if (!sig && targetNft && !ctx.positionMap.findByOurNft(ourNft)) {
-            results.push({ nft: ourNft, ok: true, message: 'Position already gone on-chain; local mapping removed' });
+            results.push({
+              nft: ourNft,
+              ok: true,
+              message: 'Position already gone on-chain; local mapping removed',
+            });
             continue;
           }
           if (sig) {
@@ -1876,7 +2206,7 @@ async function handleAPI(
           results.push({ nft: ourNft, ok: false, message: err.message });
         }
       }
-      const ok = results.filter(r => r.ok).length;
+      const ok = results.filter((r) => r.ok).length;
       const fail = results.length - ok;
       return json({ ok: fail === 0, results, summary: `成功 ${ok} / 失敗 ${fail}` });
     });
@@ -1894,18 +2224,22 @@ async function handleAPI(
         const failCount = result.failures.length;
         const okCount = result.txSignatures.length;
         const tokenSummary = result.claimedTokens
-          .map(t => `${(t.amount / Math.pow(10, t.decimals)).toFixed(6)} ${t.symbol}`)
+          .map((t) => `${(t.amount / Math.pow(10, t.decimals)).toFixed(6)} ${t.symbol}`)
           .join(', ');
-        logger.info(MODULE, `手動領取完成: ${okCount} txs 成功 / ${failCount} 失敗 — ${tokenSummary}`);
+        logger.info(
+          MODULE,
+          `手動領取完成: ${okCount} txs 成功 / ${failCount} 失敗 — ${tokenSummary}`,
+        );
         return json({
           ok: failCount === 0,
           totalItems: result.totalItems,
           txCount: okCount,
           failures: result.failures,
           claimedTokens: result.claimedTokens,
-          summary: result.totalItems === 0
-            ? '沒有可領取的手續費'
-            : `${result.totalItems} 筆交易 (成功 ${okCount} / 失敗 ${failCount})${tokenSummary ? ' — ' + tokenSummary : ''}`,
+          summary:
+            result.totalItems === 0
+              ? '沒有可領取的手續費'
+              : `${result.totalItems} 筆交易 (成功 ${okCount} / 失敗 ${failCount})${tokenSummary ? ' — ' + tokenSummary : ''}`,
         });
       } catch (err: any) {
         logger.error(MODULE, `手動領取失敗: ${err.message}`);
@@ -1924,14 +2258,24 @@ async function handleAPI(
       const batchHighPrioritySeq = hasBatchHighPrioritySeq ? parsedBatchHighPrioritySeq : undefined;
       if (batchHighPrioritySeq !== undefined) {
         if (ctx.opQueue.hasHighPriorityActivityAfter(batchHighPrioritySeq)) {
-          return json({ ok: false, paused: true, message: 'Close/decrease work is pending; swap paused' });
+          return json({
+            ok: false,
+            paused: true,
+            message: 'Close/decrease work is pending; swap paused',
+          });
         }
       } else if (ctx.opQueue.isHighPriorityRunningOrPending()) {
-        return json({ ok: false, paused: true, message: 'Close/decrease work is pending; swap paused' });
+        return json({
+          ok: false,
+          paused: true,
+          message: 'Close/decrease work is pending; swap paused',
+        });
       }
       try {
-        const result = await ctx.opQueue.enqueueWithResult(`force-swap(${inputMint.slice(0, 8)})`, 'NORMAL', () =>
-          ctx.executor.swapTokenToUSDC(inputMint)
+        const result = await ctx.opQueue.enqueueWithResult(
+          `force-swap(${inputMint.slice(0, 8)})`,
+          'NORMAL',
+          () => ctx.executor.swapTokenToUSDC(inputMint),
         );
         if (result) {
           ctx.executor.invalidateAssetCaches();
@@ -1966,17 +2310,25 @@ async function handleAPI(
       try {
         const headers: Record<string, string> = {};
         if (config.jupApiKey) headers['x-api-key'] = config.jupApiKey;
-        const jupRes = await fetch(`https://api.jup.ag/tokens/v2/search?query=${mint}`, { headers });
+        const jupRes = await fetch(`https://api.jup.ag/tokens/v2/search?query=${mint}`, {
+          headers,
+        });
         if (jupRes.ok) {
-          const arr: any[] = await jupRes.json() as any;
+          const arr: any[] = (await jupRes.json()) as any;
           const t = arr?.[0];
           if (t && t.symbol) {
             // Cache for resolveTokenName/resolveLogoURI
-            tokenInfoCache.set(mint, { symbol: t.symbol, decimals: t.decimals || 6, logoURI: t.icon || '' });
+            tokenInfoCache.set(mint, {
+              symbol: t.symbol,
+              decimals: t.decimals || 6,
+              logoURI: t.icon || '',
+            });
             return json({ symbol: t.symbol, logoURI: t.icon || '' });
           }
         }
-      } catch { /* fall through */ }
+      } catch {
+        /* fall through */
+      }
       json({ symbol: null, logoURI: '' });
     })();
     return;
@@ -2002,7 +2354,9 @@ async function handleAPI(
           const raw = fs.readFileSync('./data/token-names.json', 'utf-8');
           const cache = JSON.parse(raw);
           sym = cache[mint]?.symbol || mint;
-        } catch { sym = mint; }
+        } catch {
+          sym = mint;
+        }
       }
       const pl = pool || mint + '/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
       addPumpPending({
@@ -2032,14 +2386,16 @@ async function handleAPI(
       }
       // Resolve symbol from pump-pending or token-names cache
       const pendingList = getPumpPendingList();
-      const entry = pendingList.find(e => e.mint === mint);
+      const entry = pendingList.find((e) => e.mint === mint);
       let sym = entry?.symbol || '';
       if (!sym) {
         try {
           const raw = fs.readFileSync('./data/token-names.json', 'utf-8');
           const cache = JSON.parse(raw);
           sym = cache[mint]?.symbol || mint;
-        } catch { sym = mint; }
+        } catch {
+          sym = mint;
+        }
       }
       resolvePump(mint, action);
       logger.info(MODULE, `Pump token ${sym} (${mint}) manually ${action} via Dashboard`);
@@ -2103,24 +2459,38 @@ async function handleAPI(
       }
       if (body.amountUsd !== undefined) {
         const v = parseFloat(body.amountUsd);
-        if (!isNaN(v) && v > 0) { config.dacAmountUsd = v; envUpdates.DAC_AMOUNT_USD = String(v); }
+        if (!isNaN(v) && v > 0) {
+          config.dacAmountUsd = v;
+          envUpdates.DAC_AMOUNT_USD = String(v);
+        }
       }
       if (body.thresholdMultiplier !== undefined) {
         const v = parseFloat(body.thresholdMultiplier);
-        if (!isNaN(v) && v > 0) { config.dacThresholdMultiplier = v; envUpdates.DAC_THRESHOLD_MULTIPLIER = String(v); }
+        if (!isNaN(v) && v > 0) {
+          config.dacThresholdMultiplier = v;
+          envUpdates.DAC_THRESHOLD_MULTIPLIER = String(v);
+        }
       }
       if (body.executeHour !== undefined) {
         const v = parseInt(body.executeHour);
-        if (!isNaN(v) && v >= 0 && v <= 23) { config.dacExecuteHour = v; envUpdates.DAC_EXECUTE_HOUR = String(v); }
+        if (!isNaN(v) && v >= 0 && v <= 23) {
+          config.dacExecuteHour = v;
+          envUpdates.DAC_EXECUTE_HOUR = String(v);
+        }
       }
       if (body.executeMinute !== undefined) {
         const v = parseInt(body.executeMinute);
-        if (!isNaN(v) && v >= 0 && v <= 59) { config.dacExecuteMinute = v; envUpdates.DAC_EXECUTE_MINUTE = String(v); }
+        if (!isNaN(v) && v >= 0 && v <= 59) {
+          config.dacExecuteMinute = v;
+          envUpdates.DAC_EXECUTE_MINUTE = String(v);
+        }
       }
       if (body.transferTo !== undefined) {
         const addr = String(body.transferTo).trim();
         if (addr) {
-          try { new PublicKey(addr); } catch {
+          try {
+            new PublicKey(addr);
+          } catch {
             return json({ error: `Invalid Solana address: ${addr}` }, 400);
           }
         }
@@ -2133,7 +2503,8 @@ async function handleAPI(
         envUpdates.DAC_TARGET_TOKEN = targetToken;
       }
 
-      const needsReschedule = envUpdates.DAC_ENABLED !== undefined ||
+      const needsReschedule =
+        envUpdates.DAC_ENABLED !== undefined ||
         envUpdates.DAC_EXECUTE_HOUR !== undefined ||
         envUpdates.DAC_EXECUTE_MINUTE !== undefined;
 
@@ -2148,17 +2519,20 @@ async function handleAPI(
         startDacScheduler(ctx.getConnection());
       }
 
-      return json({ ok: true, config: {
-        enabled: config.dacEnabled,
-        amountUsd: config.dacAmountUsd,
-        thresholdMultiplier: config.dacThresholdMultiplier,
-        executeHour: config.dacExecuteHour,
-        executeMinute: config.dacExecuteMinute,
-        transferTo: config.dacTransferTo,
-        targetToken: config.dacTargetToken,
-        targetSymbol: config.dacTargetSymbol,
-        targetMint: config.dacTargetMint,
-      }});
+      return json({
+        ok: true,
+        config: {
+          enabled: config.dacEnabled,
+          amountUsd: config.dacAmountUsd,
+          thresholdMultiplier: config.dacThresholdMultiplier,
+          executeHour: config.dacExecuteHour,
+          executeMinute: config.dacExecuteMinute,
+          transferTo: config.dacTransferTo,
+          targetToken: config.dacTargetToken,
+          targetSymbol: config.dacTargetSymbol,
+          targetMint: config.dacTargetMint,
+        },
+      });
     });
   }
 
@@ -2166,11 +2540,13 @@ async function handleAPI(
   if (method === 'POST' && pathname === '/api/dac/trigger') {
     logger.info(MODULE, '手動觸發 DAC');
     const connection = ctx.getConnection();
-    triggerDac(connection, true).then(record => {
-      logger.info(MODULE, `手動 DAC 完成: ${record.status}`);
-    }).catch(err => {
-      logger.error(MODULE, `手動 DAC 錯誤: ${err.message}`);
-    });
+    triggerDac(connection, true)
+      .then((record) => {
+        logger.info(MODULE, `手動 DAC 完成: ${record.status}`);
+      })
+      .catch((err) => {
+        logger.error(MODULE, `手動 DAC 錯誤: ${err.message}`);
+      });
     return json({ ok: true, message: 'DAC 已觸發，請查看日誌' });
   }
 
@@ -2184,7 +2560,9 @@ async function handleAPI(
     }
 
     let body = '';
-    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    req.on('data', (chunk: Buffer) => {
+      body += chunk.toString();
+    });
     req.on('end', () => {
       try {
         const { password } = JSON.parse(body);
@@ -2202,12 +2580,19 @@ async function handleAPI(
         const enc = Buffer.concat([cipher.update(config.privateKey, 'utf-8'), cipher.final()]);
         const tag = cipher.getAuthTag();
 
-        fs.writeFileSync(keyfilePath, JSON.stringify({
-          salt: salt.toString('hex'),
-          iv: iv.toString('hex'),
-          tag: tag.toString('hex'),
-          data: enc.toString('hex'),
-        }, null, 2));
+        fs.writeFileSync(
+          keyfilePath,
+          JSON.stringify(
+            {
+              salt: salt.toString('hex'),
+              iv: iv.toString('hex'),
+              tag: tag.toString('hex'),
+              data: enc.toString('hex'),
+            },
+            null,
+            2,
+          ),
+        );
         logger.info(MODULE, 'Encrypted keyfile written');
 
         // Step 2: Update bot .env
@@ -2250,7 +2635,10 @@ SIGNER_LOG_LEVEL=info
           execSync('npm install --silent', { cwd: signerDir, timeout: 60000 });
           logger.info(MODULE, 'Signer node_modules installed');
         } catch (err: any) {
-          logger.warn(MODULE, `Signer npm install failed (will fall back to parent): ${err.message}`);
+          logger.warn(
+            MODULE,
+            `Signer npm install failed (will fall back to parent): ${err.message}`,
+          );
         }
 
         // Step 3: Install systemd service
@@ -2271,7 +2659,9 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 `;
-          execSync(`echo '${unitContent.replace(/'/g, "'\\''")}' | sudo tee /etc/systemd/system/byreal-signer.service > /dev/null`);
+          execSync(
+            `echo '${unitContent.replace(/'/g, "'\\''")}' | sudo tee /etc/systemd/system/byreal-signer.service > /dev/null`,
+          );
           execSync('sudo systemctl daemon-reload');
           execSync('sudo systemctl enable byreal-signer');
           logger.info(MODULE, 'Signer systemd service installed');
@@ -2307,9 +2697,19 @@ WantedBy=multi-user.target
     // Try connecting to the signer socket
     const net = require('net') as typeof import('net');
     const sock = net.createConnection(config.signerSocketPath);
-    const timeout = setTimeout(() => { sock.destroy(); json({ enabled: true, unlocked: false }); }, 2000);
-    sock.on('connect', () => { clearTimeout(timeout); sock.destroy(); json({ enabled: true, unlocked: true }); });
-    sock.on('error', () => { clearTimeout(timeout); json({ enabled: true, unlocked: false }); });
+    const timeout = setTimeout(() => {
+      sock.destroy();
+      json({ enabled: true, unlocked: false });
+    }, 2000);
+    sock.on('connect', () => {
+      clearTimeout(timeout);
+      sock.destroy();
+      json({ enabled: true, unlocked: true });
+    });
+    sock.on('error', () => {
+      clearTimeout(timeout);
+      json({ enabled: true, unlocked: false });
+    });
     return;
   }
 
@@ -2319,7 +2719,9 @@ WantedBy=multi-user.target
       return json({ ok: false, error: 'Signer not enabled' }, 400);
     }
     let body = '';
-    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    req.on('data', (chunk: Buffer) => {
+      body += chunk.toString();
+    });
     req.on('end', async () => {
       try {
         const unlockPort = parseInt(process.env.SIGNER_UNLOCK_PORT || '3848');

@@ -15,7 +15,9 @@ export const DAC_TOKEN_OPTIONS: Record<DacTargetToken, { symbol: string; mint: s
 export const MIN_SDK_PRIORITY_FEE_MICROLAMPORTS = 1;
 
 export function normalizeDacTargetToken(value: unknown): DacTargetToken {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = String(value || '')
+    .trim()
+    .toLowerCase();
   return raw === 'xbtc' ? 'xbtc' : 'cbbtc';
 }
 
@@ -40,9 +42,9 @@ function parseTargetWallets(raw: string): { wallets: PublicKey[]; ratios: Map<st
   const ratios = new Map<string, number>();
   const wallets = raw
     .split(',')
-    .map(s => s.trim())
-    .filter(s => s.length > 0)
-    .map(s => {
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => {
       const colonIdx = s.lastIndexOf(':');
       if (colonIdx > 0) {
         const addr = s.slice(0, colonIdx).trim();
@@ -63,9 +65,8 @@ const { wallets: parsedOrcaTargetWallets, ratios: parsedOrcaWalletRatios } = par
   process.env.ORCA_TARGET_WALLETS || '',
 );
 
-const { wallets: parsedMeteoraTargetWallets, ratios: parsedMeteoraWalletRatios } = parseTargetWallets(
-  process.env.METEORA_TARGET_WALLETS || '',
-);
+const { wallets: parsedMeteoraTargetWallets, ratios: parsedMeteoraWalletRatios } =
+  parseTargetWallets(process.env.METEORA_TARGET_WALLETS || '');
 
 const { wallets: parsedPcsTargetWallets, ratios: parsedPcsWalletRatios } = parseTargetWallets(
   process.env.PCS_TARGET_WALLETS || '',
@@ -89,7 +90,9 @@ export const config = {
   readRpcUrl: process.env.ALCHEMY_RPC_URL || '',
   // For per-position LP token price chart (comma-separated, used round-robin)
   rpcUrlsFree: (process.env.RPC_URL_FREE || 'https://api.mainnet-beta.solana.com')
-    .split(',').map(s => s.trim()).filter(s => s.length > 0),
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0),
 
   // Monitor targets (parsed from TARGET_WALLETS with optional :ratio suffix)
   targetWallets: parsedTargetWallets,
@@ -100,8 +103,8 @@ export const config = {
   closeOnlyWallets: new Set(
     (process.env.CLOSE_ONLY_WALLETS || '')
       .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
 
   // Strategy
@@ -116,7 +119,9 @@ export const config = {
   // Byreal
   byrealSkipSol: process.env.BYREAL_SKIP_SOL !== 'false', // default true
   byrealMaxOpenPositions: normalizeByrealMaxOpenPositions(process.env.BYREAL_MAX_OPEN_POSITIONS),
-  byrealProgramId: new PublicKey(process.env.BYREAL_PROGRAM_ID || 'REALQqNEomY6cQGZJUGwywTBD2UmDT32rZcNnfxQ5N2'),
+  byrealProgramId: new PublicKey(
+    process.env.BYREAL_PROGRAM_ID || 'REALQqNEomY6cQGZJUGwywTBD2UmDT32rZcNnfxQ5N2',
+  ),
 
   // Jupiter
   jupiterProgramId: new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'),
@@ -132,10 +137,13 @@ export const config = {
   allowSameWalletReopen: process.env.ALLOW_SAME_WALLET_REOPEN === 'true',
   skipSameTickRange: process.env.SKIP_SAME_TICK_RANGE === 'true',
   byrealAllowSameTickWallets: parseWalletSet(process.env.BYREAL_ALLOW_SAME_TICK_WALLETS || ''),
-  byrealAllowOpenAfterOthersWallets: parseWalletSet(process.env.BYREAL_ALLOW_OPEN_AFTER_OTHERS_WALLETS || ''),
+  byrealAllowOpenAfterOthersWallets: parseWalletSet(
+    process.env.BYREAL_ALLOW_OPEN_AFTER_OTHERS_WALLETS || '',
+  ),
   // Pump token filter: 'off' | 'full' (block all) | 'discord' (notify & approve)
   // Backward compat: if PUMP_FILTER_MODE not set, fall back to IGNORE_PUMP_TOKENS
-  pumpFilterMode: (process.env.PUMP_FILTER_MODE as 'off' | 'full' | 'discord') ||
+  pumpFilterMode:
+    (process.env.PUMP_FILTER_MODE as 'off' | 'full' | 'discord') ||
     (process.env.IGNORE_PUMP_TOKENS === 'true' ? 'full' : 'off'),
   minPoolAgeDays: parseInt(process.env.MIN_POOL_AGE_DAYS || '0'),
   poolAgeWhitelist: parseMintSet(process.env.POOL_AGE_WHITELIST || ''),
@@ -150,7 +158,10 @@ export const config = {
   // Pool TVL filter (0 = disabled)
   minPoolTvl: parseFloat(process.env.MIN_POOL_TVL || '0'),
   poolTvlWhitelist: new Set(
-    (process.env.POOL_TVL_WHITELIST || '').split(',').map(s => s.trim()).filter(s => s.length > 0)
+    (process.env.POOL_TVL_WHITELIST || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
   poolTvlRefreshMinutes: parseFloat(process.env.POOL_TVL_REFRESH_MINUTES || '60'),
   tvlSource: (process.env.TVL_SOURCE || 'dex') as 'dex' | 'jupiter',
@@ -160,10 +171,16 @@ export const config = {
   tokenLossStreakLimit: parseInt(process.env.TOKEN_LOSS_STREAK_LIMIT || '3'),
   tokenCooldownMinutes: parseInt(process.env.TOKEN_COOLDOWN_MINUTES || '60'),
   tokenBlacklist: new Set(
-    (process.env.TOKEN_BLACKLIST || '').split(',').map(s => s.trim()).filter(s => s.length > 0)
+    (process.env.TOKEN_BLACKLIST || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
   tokenWhitelist: new Set(
-    (process.env.TOKEN_WHITELIST || '').split(',').map(s => s.trim()).filter(s => s.length > 0)
+    (process.env.TOKEN_WHITELIST || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
 
   // Auto-Claim
@@ -179,8 +196,12 @@ export const config = {
   dacTargetToken: normalizeDacTargetToken(process.env.DAC_TARGET_TOKEN),
   dacCbbtcMint: DAC_TOKEN_OPTIONS.cbbtc.mint,
   dacXbtcMint: DAC_TOKEN_OPTIONS.xbtc.mint,
-  get dacTargetSymbol() { return DAC_TOKEN_OPTIONS[this.dacTargetToken].symbol; },
-  get dacTargetMint() { return DAC_TOKEN_OPTIONS[this.dacTargetToken].mint; },
+  get dacTargetSymbol() {
+    return DAC_TOKEN_OPTIONS[this.dacTargetToken].symbol;
+  },
+  get dacTargetMint() {
+    return DAC_TOKEN_OPTIONS[this.dacTargetToken].mint;
+  },
 
   // Dashboard
   dashboardPort: parseInt(process.env.DASHBOARD_PORT || '3847'),
@@ -200,8 +221,8 @@ export const config = {
   orcaCloseOnlyWallets: new Set(
     (process.env.ORCA_CLOSE_ONLY_WALLETS || '')
       .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
 
   // Meteora DLMM
@@ -213,8 +234,8 @@ export const config = {
   meteoraCloseOnlyWallets: new Set(
     (process.env.METEORA_CLOSE_ONLY_WALLETS || '')
       .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
 
   // PancakeSwap CLMM (Raydium fork)
@@ -226,8 +247,8 @@ export const config = {
   pcsCloseOnlyWallets: new Set(
     (process.env.PCS_CLOSE_ONLY_WALLETS || '')
       .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
 
   // Meteora DAMM v2 (Constant Product AMM)
@@ -239,8 +260,8 @@ export const config = {
   dammv2CloseOnlyWallets: new Set(
     (process.env.DAMMV2_CLOSE_ONLY_WALLETS || '')
       .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   ),
 
   // Paths

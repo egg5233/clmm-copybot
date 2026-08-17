@@ -17,7 +17,7 @@ const keypair = Keypair.fromSecretKey(bs58.decode(PRIVATE_KEY));
 const WALLET = keypair.publicKey.toBase58();
 
 async function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function apiGet(path: string): Promise<any> {
@@ -76,7 +76,9 @@ async function main() {
     if (item.rewardClaimInfo) {
       for (const info of item.rewardClaimInfo) {
         const amount = Number(info.tokenAmount) / Math.pow(10, info.tokenDecimals);
-        console.log(`  ${info.tokenSymbol}: ${amount} (raw: ${info.tokenAmount}, decimals: ${info.tokenDecimals})`);
+        console.log(
+          `  ${info.tokenSymbol}: ${amount} (raw: ${info.tokenAmount}, decimals: ${info.tokenDecimals})`,
+        );
       }
     }
   }
@@ -143,7 +145,7 @@ async function main() {
   console.log('\nDone!');
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Fatal error:', err);
   process.exit(1);
 });

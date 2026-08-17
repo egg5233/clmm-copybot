@@ -7,7 +7,10 @@ export interface ByrealReconcileTargetStatus {
   detail: string;
 }
 
-export function classifyByrealReconcilePosition(position: { rawPositionInfo?: { liquidity?: BN } } | null, side: 'target' | 'our'): ByrealReconcileTargetStatus {
+export function classifyByrealReconcilePosition(
+  position: { rawPositionInfo?: { liquidity?: BN } } | null,
+  side: 'target' | 'our',
+): ByrealReconcileTargetStatus {
   if (!position) {
     return { isOrphan: true, status: 'orphan', detail: `${side} position returned null` };
   }
@@ -24,6 +27,8 @@ export function classifyByrealReconcilePosition(position: { rawPositionInfo?: { 
   };
 }
 
-export function classifyByrealReconcileTarget(position: { rawPositionInfo?: { liquidity?: BN } } | null): ByrealReconcileTargetStatus {
+export function classifyByrealReconcileTarget(
+  position: { rawPositionInfo?: { liquidity?: BN } } | null,
+): ByrealReconcileTargetStatus {
   return classifyByrealReconcilePosition(position, 'target');
 }

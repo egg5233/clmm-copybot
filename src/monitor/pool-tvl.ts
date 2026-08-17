@@ -9,10 +9,11 @@ const API_URL = 'https://api2.byreal.io/byreal/api/dex/v2/pools/info/list';
 const PAGE_SIZE = 100;
 const CACHE_FILE = path.resolve('./data/tvl-cache.json');
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36',
-  'Accept': 'application/json',
-  'Referer': 'https://www.byreal.io/',
-  'Origin' : 'https://www.byreal.io/',
+  'User-Agent':
+    'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36',
+  Accept: 'application/json',
+  Referer: 'https://www.byreal.io/',
+  Origin: 'https://www.byreal.io/',
 };
 
 export interface PoolCacheEntry {
@@ -39,7 +40,11 @@ export function getPoolInfo(tokenAddress: string): PoolCacheEntry | null {
 export function getTvlCacheInfo(): { size: number; lastFetchAt: number } {
   let ts = lastFetchAt;
   if (!ts) {
-    try { ts = fs.statSync(CACHE_FILE).mtimeMs; } catch { /* ignore */ }
+    try {
+      ts = fs.statSync(CACHE_FILE).mtimeMs;
+    } catch {
+      /* ignore */
+    }
   }
   return { size: tvlCache.size, lastFetchAt: ts };
 }
@@ -88,7 +93,7 @@ export async function fetchAndCache(): Promise<void> {
   while (true) {
     const res = await fetch(`${API_URL}?page=${page}&pageSize=${PAGE_SIZE}`, { headers: HEADERS });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
     const records: any[] = data?.result?.data?.records;
     if (!Array.isArray(records) || records.length === 0) break;
 
@@ -118,17 +123,20 @@ export function startPoolTvlCollector(refreshMinutes = 60): void {
 
   // Load from file if still fresh, otherwise fetch immediately
   if (!tryLoadFromFile(ms)) {
-    fetchAndCache().catch(err => logger.warn(MODULE, `Initial fetch failed: ${err.message}`));
+    fetchAndCache().catch((err) => logger.warn(MODULE, `Initial fetch failed: ${err.message}`));
   }
 
   timer = setInterval(() => {
-    fetchAndCache().catch(err => logger.warn(MODULE, `Refresh failed: ${err.message}`));
+    fetchAndCache().catch((err) => logger.warn(MODULE, `Refresh failed: ${err.message}`));
   }, ms);
   logger.info(MODULE, `Started, refresh every ${refreshMinutes}min`);
 }
 
 export function stopPoolTvlCollector(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
 }
 
 /**
@@ -151,10 +159,13 @@ export async function checkTokenLiquidity(
 
 /** Update the refresh interval without triggering a new fetch */
 export function setPoolTvlRefreshMinutes(refreshMinutes: number): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
   const ms = Math.max(15, refreshMinutes) * 60 * 1000;
   timer = setInterval(() => {
-    fetchAndCache().catch(err => logger.warn(MODULE, `Refresh failed: ${err.message}`));
+    fetchAndCache().catch((err) => logger.warn(MODULE, `Refresh failed: ${err.message}`));
   }, ms);
   logger.info(MODULE, `Refresh interval updated to ${refreshMinutes}min`);
 }

@@ -61,7 +61,9 @@ function loadDacHistory(): void {
       const data = JSON.parse(fs.readFileSync(DAC_HISTORY_FILE, 'utf-8'));
       if (Array.isArray(data)) dacHistory = data;
     }
-  } catch { /* start fresh */ }
+  } catch {
+    /* start fresh */
+  }
 }
 
 function saveDacHistory(): void {
@@ -127,11 +129,14 @@ async function calculateProfit(): Promise<number> {
   // Force a fresh snapshot and wait for it to settle
   const preRawLen = getAssetTrend().raw.length;
   forceSnapshot();
-  await new Promise(resolve => setTimeout(resolve, 15_000));
+  await new Promise((resolve) => setTimeout(resolve, 15_000));
 
   const trendData = getAssetTrend();
   if (trendData.raw.length <= preRawLen) {
-    logger.warn(MODULE, 'forceSnapshot did not produce a new snapshot (may have been in progress), using latest available');
+    logger.warn(
+      MODULE,
+      'forceSnapshot did not produce a new snapshot (may have been in progress), using latest available',
+    );
   }
 
   // Find yesterday's daily snapshot — must be from a PREVIOUS calendar day (Asia/Taipei)
@@ -152,7 +157,10 @@ async function calculateProfit(): Promise<number> {
   }
 
   if (!yesterday) {
-    logger.warn(MODULE, `No daily snapshot before today (Taipei) found (daily entries: ${trendData.daily.length})`);
+    logger.warn(
+      MODULE,
+      `No daily snapshot before today (Taipei) found (daily entries: ${trendData.daily.length})`,
+    );
     return 0;
   }
 
@@ -165,12 +173,16 @@ async function calculateProfit(): Promise<number> {
   const today = trendData.raw[trendData.raw.length - 1];
 
   // Exclude SOL: same formula as Dashboard "排除 SOL" = totalUsd - solBalanceUsd - lockedSolUsd
-  const yesterdayExclSol = yesterday.totalUsd - (yesterday.solBalanceUsd || 0) - (yesterday.lockedSolUsd || 0);
+  const yesterdayExclSol =
+    yesterday.totalUsd - (yesterday.solBalanceUsd || 0) - (yesterday.lockedSolUsd || 0);
   const todayExclSol = today.totalUsd - (today.solBalanceUsd || 0) - (today.lockedSolUsd || 0);
   const profit = todayExclSol - yesterdayExclSol;
 
   const yesterdayDate = new Date(yesterday.ts).toISOString().slice(0, 10);
-  logger.info(MODULE, `Profit calc: baseline=${yesterdayDate} $${yesterdayExclSol.toFixed(2)} today=$${todayExclSol.toFixed(2)} profit=$${profit.toFixed(2)}`);
+  logger.info(
+    MODULE,
+    `Profit calc: baseline=${yesterdayDate} $${yesterdayExclSol.toFixed(2)} today=$${todayExclSol.toFixed(2)} profit=$${profit.toFixed(2)}`,
+  );
   return profit;
 }
 
@@ -226,9 +238,10 @@ async function sendDacNotification(record: DacRecord): Promise<void> {
     apiKey: config.discordApiKey || '',
     type: 'dac',
     title: `DAC ${statusLabel[record.status] || record.status}`,
-    description: record.status === 'success'
-      ? `每日定投：$${record.dacAmountUsd} USDC → ${tokenReceived} ${tokenSymbol}`
-      : record.reason || record.status,
+    description:
+      record.status === 'success'
+        ? `每日定投：$${record.dacAmountUsd} USDC → ${tokenReceived} ${tokenSymbol}`
+        : record.reason || record.status,
     timestamp: new Date(record.ts).toISOString(),
     fields,
     version: pkg.version,
@@ -281,7 +294,9 @@ async function executeDacSwapAndTransfer(
   try {
     const preBalInfo = await connection.getTokenAccountBalance(senderAta);
     preSwapBalance = BigInt(preBalInfo.value.amount);
-  } catch { /* ATA may not exist yet — balance is 0 */ }
+  } catch {
+    /* ATA may not exist yet — balance is 0 */
+  }
 
   // Step 4: Swap USDC to selected BTC token
   const rawAmount = Math.floor(dacAmountUsd * 1e6); // USDC has 6 decimals
@@ -306,7 +321,7 @@ async function executeDacSwapAndTransfer(
       const destAta = getAssociatedTokenAddressSync(targetMintPubkey, destPubkey);
 
       // Wait a moment for the swap TX to be indexed
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
 
       // Get post-swap balance, transfer only the delta from this swap
       const balInfo = await connection.getTokenAccountBalance(senderAta);
@@ -327,12 +342,24 @@ async function executeDacSwapAndTransfer(
       logger.info(MODULE, `Transferring ${record.tokenReceived} ${targetSymbol} to ${transferTo}`);
 
       const tx = new Transaction();
-      tx.add(createAssociatedTokenAccountIdempotentInstruction(
-        getUserAddress(), destAta, destPubkey, targetMintPubkey,
-      ));
-      tx.add(createTransferCheckedInstruction(
-        senderAta, targetMintPubkey, destAta, getUserAddress(), transferAmount, decimals,
-      ));
+      tx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          getUserAddress(),
+          destAta,
+          destPubkey,
+          targetMintPubkey,
+        ),
+      );
+      tx.add(
+        createTransferCheckedInstruction(
+          senderAta,
+          targetMintPubkey,
+          destAta,
+          getUserAddress(),
+          transferAmount,
+          decimals,
+        ),
+      );
 
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
@@ -340,7 +367,10 @@ async function executeDacSwapAndTransfer(
       const signedTx = await signLegacy(tx);
 
       const sig = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+      await connection.confirmTransaction(
+        { signature: sig, blockhash, lastValidBlockHeight },
+        'confirmed',
+      );
 
       record.transferSig = sig;
       record.status = 'success';
@@ -356,25 +386,38 @@ async function executeDacSwapAndTransfer(
 
     // Still try to read target token balance for the record
     try {
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
       const balInfo = await connection.getTokenAccountBalance(senderAta);
       const postBalance = BigInt(balInfo.value.amount);
       const delta = postBalance - preSwapBalance;
       const decimals = balInfo.value.decimals;
       record.cbbtcReceived = (Number(delta) / 10 ** decimals).toFixed(decimals);
       record.tokenReceived = record.cbbtcReceived;
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
   }
 }
 
-export async function triggerDac(connection: Connection, skipProfitCheck = false): Promise<DacRecord> {
+export async function triggerDac(
+  connection: Connection,
+  skipProfitCheck = false,
+): Promise<DacRecord> {
   // Concurrency guard — prevent double-swap if scheduler + manual trigger overlap
   if (dacRunning) {
     logger.warn(MODULE, 'DAC already running, skipping');
     return {
-      ts: Date.now(), profitUsd: 0, dacAmountUsd: config.dacAmountUsd || 0,
-      cbbtcReceived: '', tokenReceived: '', tokenSymbol: config.dacTargetSymbol, tokenMint: config.dacTargetMint, swapSig: null, transferSig: null,
-      transferTo: config.dacTransferTo || '', status: 'skipped',
+      ts: Date.now(),
+      profitUsd: 0,
+      dacAmountUsd: config.dacAmountUsd || 0,
+      cbbtcReceived: '',
+      tokenReceived: '',
+      tokenSymbol: config.dacTargetSymbol,
+      tokenMint: config.dacTargetMint,
+      swapSig: null,
+      transferSig: null,
+      transferTo: config.dacTransferTo || '',
+      status: 'skipped',
       reason: 'Another DAC run already in progress',
     };
   }
@@ -386,16 +429,22 @@ export async function triggerDac(connection: Connection, skipProfitCheck = false
     const todayTaipei = new Date(Date.now() + taipeiOffset);
     todayTaipei.setUTCHours(0, 0, 0, 0);
     const todayStartUtc = todayTaipei.getTime() - taipeiOffset;
-    const alreadyRanToday = dacHistory.some(
-      r => r.status === 'success' && r.ts >= todayStartUtc
-    );
+    const alreadyRanToday = dacHistory.some((r) => r.status === 'success' && r.ts >= todayStartUtc);
     if (alreadyRanToday) {
       dacRunning = false;
       logger.info(MODULE, 'DAC already succeeded today (Taipei), skipping');
       return {
-        ts: Date.now(), profitUsd: 0, dacAmountUsd: config.dacAmountUsd || 0,
-        cbbtcReceived: '', tokenReceived: '', tokenSymbol: config.dacTargetSymbol, tokenMint: config.dacTargetMint, swapSig: null, transferSig: null,
-        transferTo: config.dacTransferTo || '', status: 'skipped',
+        ts: Date.now(),
+        profitUsd: 0,
+        dacAmountUsd: config.dacAmountUsd || 0,
+        cbbtcReceived: '',
+        tokenReceived: '',
+        tokenSymbol: config.dacTargetSymbol,
+        tokenMint: config.dacTargetMint,
+        swapSig: null,
+        transferSig: null,
+        transferTo: config.dacTransferTo || '',
+        status: 'skipped',
         reason: 'Already ran successfully today',
       };
     }
@@ -429,7 +478,16 @@ export async function triggerDac(connection: Connection, skipProfitCheck = false
       record.reason = 'dacAmountUsd is 0 or negative, skipping';
       logger.warn(MODULE, record.reason);
     } else {
-      await executeDacSwapAndTransfer(connection, record, dacAmountUsd, thresholdMultiplier, transferTo, targetMint, targetSymbol, skipProfitCheck);
+      await executeDacSwapAndTransfer(
+        connection,
+        record,
+        dacAmountUsd,
+        thresholdMultiplier,
+        transferTo,
+        targetMint,
+        targetSymbol,
+        skipProfitCheck,
+      );
     }
   } catch (err: any) {
     record.status = 'swap_failed';
@@ -458,7 +516,10 @@ export function startDacScheduler(connection: Connection): void {
     logger.info(MODULE, 'DAC disabled (DAC_ENABLED != true)');
     return;
   }
-  logger.info(MODULE, `DAC scheduler started (daily at ${config.dacExecuteHour}:${String(config.dacExecuteMinute || 0).padStart(2, '0')} Asia/Taipei)`);
+  logger.info(
+    MODULE,
+    `DAC scheduler started (daily at ${config.dacExecuteHour}:${String(config.dacExecuteMinute || 0).padStart(2, '0')} Asia/Taipei)`,
+  );
   if (dacHistory.length > 0) {
     const last = dacHistory[dacHistory.length - 1];
     logger.info(MODULE, `Last DAC: ${new Date(last.ts).toISOString()} status=${last.status}`);

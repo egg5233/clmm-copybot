@@ -39,7 +39,9 @@ function buildJupiterTx(extraInstructions: TransactionInstruction[] = []): Versi
 }
 
 function instructionTypes(tx: VersionedTransaction): Array<number | null> {
-  return tx.message.compiledInstructions.map((ix) => getJupiterComputeBudgetInstructionType(tx, ix));
+  return tx.message.compiledInstructions.map((ix) =>
+    getJupiterComputeBudgetInstructionType(tx, ix),
+  );
 }
 
 function snapshotInstructions(tx: VersionedTransaction) {
@@ -138,8 +140,12 @@ describe('stripJupiterComputeUnitPrice', () => {
     const roundTripped = VersionedTransaction.deserialize(tx.serialize());
 
     expect(roundTripped.message.recentBlockhash).toBe(beforeBlockhash);
-    expect(roundTripped.message.staticAccountKeys.map((key) => key.toBase58())).toEqual(beforeStaticKeys);
+    expect(roundTripped.message.staticAccountKeys.map((key) => key.toBase58())).toEqual(
+      beforeStaticKeys,
+    );
     expect(JSON.stringify(roundTripped.message.addressTableLookups)).toBe(beforeLookups);
-    expect(instructionTypes(roundTripped).filter((type) => type === SET_COMPUTE_UNIT_PRICE)).toEqual([]);
+    expect(
+      instructionTypes(roundTripped).filter((type) => type === SET_COMPUTE_UNIT_PRICE),
+    ).toEqual([]);
   });
 });
