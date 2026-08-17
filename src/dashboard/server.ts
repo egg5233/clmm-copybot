@@ -14,6 +14,8 @@ import {
 import { logger, logEmitter, getRecentLogs, LogEntry } from '../utils/logger';
 import { getUserAddress } from '../utils/wallet';
 import { BotContext } from './context';
+import { buildHealth } from './health';
+import { metricsContentType, metricsText, setQueueDepthProvider } from './metrics';
 import { getAssetTrend, forceSnapshot, getTrendLatestTs } from './asset-trend';
 import {
   claimCopyBonus,
@@ -477,27 +479,37 @@ function _broadcastWs(type: string, data: any): void {
 }
 
 export async function startDashboard(ctx: BotContext): Promise<void> {
-  if (!config.dashboardPassword) {
-    logger.warn(MODULE, 'DASHBOARD_PASSWORD not set, dashboard disabled');
-    return;
+  // Without a password the dashboard itself stays off — but the process still
+  // needs to be observable, so the server comes up serving /health and /metrics
+  // and nothing else. An operator running headless gets monitoring without
+  // being pushed into inventing a password for a UI they never open.
+  const dashboardEnabled = !!config.dashboardPassword;
+  if (!dashboardEnabled) {
+    logger.warn(
+      MODULE,
+      'DASHBOARD_PASSWORD not set, dashboard disabled — serving /health and /metrics only',
+    );
   }
 
-  // Load auth log and coin concentration overrides
-  await initAuthLog();
-  loadCcOverrides();
+  // The queue never announces its depth; the gauge pulls it on each scrape.
+  setQueueDepthProvider(() => ctx.opQueue.pendingCount);
 
-  // Load token info from disk cache; fetch API only if some tokens are missing logos
-  loadTokenInfo();
-  let missingLogos = 0;
-  for (const [, info] of tokenInfoCache) {
-    if (!info.logoURI) missingLogos++;
-  }
-  if (missingLogos > 0) {
-    logger.info(MODULE, `${missingLogos} tokens missing logoURI, fetching from API...`);
-    fetchAndCacheTokenInfo().catch(() => {});
-  }
-  // Resolve unknown mints from position map on startup
-  {
+  if (dashboardEnabled) {
+    // Load auth log and coin concentration overrides
+    await initAuthLog();
+    loadCcOverrides();
+
+    // Load token info from disk cache; fetch API only if some tokens are missing logos
+    loadTokenInfo();
+    let missingLogos = 0;
+    for (const [, info] of tokenInfoCache) {
+      if (!info.logoURI) missingLogos++;
+    }
+    if (missingLogos > 0) {
+      logger.info(MODULE, `${missingLogos} tokens missing logoURI, fetching from API...`);
+      fetchAndCacheTokenInfo().catch(() => {});
+    }
+    // Resolve unknown mints from position map on startup
     const startupMints: string[] = [];
     const raw = ctx.positionMap.toJSON();
     for (const val of Object.values(raw)) {
@@ -513,6 +525,22 @@ export async function startDashboard(ctx: BotContext): Promise<void> {
 
   // --- HTTP Server ---
   const server = http.createServer((req, res) => {
+    const obsUrl = new URL(req.url || '/', `http://localhost:${port}`);
+
+    // Observability first: ahead of the rate limiter, so a scraper never gets
+    // locked out by someone else's failed logins from the same address, and
+    // ahead of the dashboard-disabled check, so both modes serve them.
+    if (obsUrl.pathname === '/health' || obsUrl.pathname === '/metrics') {
+      handleObservability(req, res, obsUrl.pathname, ctx);
+      return;
+    }
+
+    if (!dashboardEnabled) {
+      res.writeHead(404);
+      res.end('Not Found');
+      return;
+    }
+
     const clientIP = getClientIP(req);
 
     // Rate limit check
@@ -532,7 +560,7 @@ export async function startDashboard(ctx: BotContext): Promise<void> {
       return;
     }
 
-    const url = new URL(req.url || '/', `http://localhost:${port}`);
+    const url = obsUrl;
     const pathname = url.pathname;
 
     // Block crawlers
@@ -570,7 +598,72 @@ export async function startDashboard(ctx: BotContext): Promise<void> {
     res.end('Not Found');
   });
 
-  // --- WebSocket Server ---
+  // Only with a password: the WS handshake authenticates by comparing against
+  // config.dashboardPassword, which an empty password would let any client match.
+  if (dashboardEnabled) attachDashboardRealtime(server);
+
+  server.listen(port, config.dashboardIP, () => {
+    const what = dashboardEnabled ? 'Dashboard' : 'Observability endpoints';
+    logger.info(MODULE, `${what} running on http://${config.dashboardIP}:${port}`);
+  });
+}
+
+/**
+ * Serve `GET /health` and `GET /metrics`.
+ *
+ * Both are unauthenticated, which is safe for the same reason the dashboard is
+ * reachable at all: the server binds DASHBOARD_IP, 127.0.0.1 by default, so the
+ * listener is loopback or LAN and the public entry point is the operator's
+ * tunnel, which forwards the dashboard's own paths. Neither response carries
+ * wallet addresses, balances, positions or transaction signatures — /health is
+ * five status fields and /metrics is counters, a queue depth and process stats.
+ * An operator exposing this beyond a trusted network should front it with the
+ * same reverse proxy that terminates TLS and require auth there; that is the
+ * conventional arrangement for a Prometheus target, which cannot log in.
+ */
+function handleObservability(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  pathname: string,
+  ctx: BotContext,
+): void {
+  if ((req.method || 'GET') !== 'GET') {
+    res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'GET' });
+    res.end(JSON.stringify({ error: 'Method Not Allowed' }));
+    return;
+  }
+
+  if (pathname === '/metrics') {
+    metricsText()
+      .then((body) => {
+        res.writeHead(200, { 'Content-Type': metricsContentType });
+        res.end(body);
+      })
+      .catch((err: any) => {
+        logger.warn(MODULE, `/metrics failed: ${err.message}`);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('metrics collection failed\n');
+      });
+    return;
+  }
+
+  // Always 200, including when degraded: the body carries the verdict, and a
+  // non-2xx here would tell a supervisor to restart a bot that is up and only
+  // waiting on its RPC endpoint to come back.
+  buildHealth(ctx.startedAt)
+    .then((health) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(health));
+    })
+    .catch((err: any) => {
+      logger.warn(MODULE, `/health failed: ${err.message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'degraded', error: 'health check failed' }));
+    });
+}
+
+/** The dashboard's authenticated WebSocket feed: live logs and keepalive pings. */
+function attachDashboardRealtime(server: http.Server): void {
   const wss = new WebSocket.Server({ server, path: '/ws' });
   const authenticatedClients = new Set<WebSocket>();
   wsClientsRef = authenticatedClients;
@@ -645,10 +738,6 @@ export async function startDashboard(ctx: BotContext): Promise<void> {
         ws.send(msg);
       }
     }
-  });
-
-  server.listen(port, config.dashboardIP, () => {
-    logger.info(MODULE, `Dashboard running on http://127.0.0.1:${port} (tunnel only)`);
   });
 }
 

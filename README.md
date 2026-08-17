@@ -124,9 +124,19 @@ docs/                        # design documents
 
 ## Engineering practices
 
+- **Observability.** `GET /health` and `GET /metrics` on the dashboard port, both unauthenticated (see below).
 - **A regression test per production incident.** Most files in `tests/` exist because something once went wrong with real money on the line; the test pins the fix.
 - **Agentic development.** The system is built and maintained with Claude Code under a documented workflow — see [docs/agentic-workflow.md](docs/agentic-workflow.md). The signer's policy engine doubles as the guardrail layer that makes autonomous operation acceptable.
 - **Changelog discipline.** Every deploy is versioned and recorded in [CHANGELOG.md](CHANGELOG.md) (65KB and counting).
+
+### Observability
+
+Two endpoints on the dashboard port (`DASHBOARD_PORT`, default 3847):
+
+- **`GET /health`** — `{status, uptime_s, ws_connected, db, signer}`. The database and signer probes are live (a `SELECT 1`, a connect to the signer socket), each bounded at one second; a dependency the deployment does not use reports `off` rather than `error`. `status` is `degraded` when the database is unreachable or the target-wallet subscription is down, and the response is `200` either way — the body carries the verdict, so a supervisor does not restart a bot that is merely waiting on its RPC endpoint.
+- **`GET /metrics`** — Prometheus text format: `copybot_events_total{type,dex,success}`, `copybot_queue_depth`, `copybot_signer_sign_seconds` (histogram), `copybot_ws_connected`, plus the standard Node.js process metrics.
+
+Both are unauthenticated and neither exposes wallet addresses, balances, positions or signatures. The server binds `DASHBOARD_IP` (127.0.0.1 by default), so the listener is loopback or LAN; exposing it more widely means fronting it with a reverse proxy that authenticates on the operator's behalf — a Prometheus scraper cannot log in. They are also the one part of the dashboard that runs **without** `DASHBOARD_PASSWORD`: with no password the UI and its WebSocket stay off, and the server comes up serving only these two paths, so a headless deployment is still monitorable.
 
 ## Roadmap
 
@@ -135,7 +145,9 @@ docs/                        # design documents
 | Vitest migration + lint + CI                                                                                                            | done — 141 tests                     |
 | **Rust signer** (`signer-rs/`): drop-in daemon, differential test harness vs the TS implementation, byte-identical signing verification | done — 170 tests, 18/18 differential |
 | **Postgres persistence**: replace JSON-file state with a repository layer, migrations, docker-compose                                   | done — 12 tables, 159 DB tests       |
-| Prometheus metrics + health endpoints                                                                                                   | planned                              |
+| **Prometheus metrics + health endpoints**: `/metrics` and `/health`, unauthenticated, available without a dashboard password            | done — 4 bot metrics + process stats |
+
+Future work: a Go extraction of the pool-TVL aggregator, HTTP-level dashboard route tests (the retired source-grep tests' remaining gap — see [docs/testing-notes.md](docs/testing-notes.md)), and a versioned keyfile format with a standard 12-byte GCM nonce.
 
 ## License
 

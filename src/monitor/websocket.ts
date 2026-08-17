@@ -1,5 +1,6 @@
 import { Connection, Logs, PublicKey } from '@solana/web3.js';
 import { config } from '../config';
+import { setWsConnected } from '../dashboard/metrics';
 import { logger } from '../utils/logger';
 
 const MODULE = 'WebSocket';
@@ -26,6 +27,27 @@ export class WebSocketMonitor {
       wsEndpoint: config.wsUrl,
       commitment: 'confirmed',
     });
+    this.trackSocketState(this.connection);
+  }
+
+  /**
+   * Report the real socket state to the metrics registry.
+   *
+   * `onLogs()` cannot tell us this: it hands back a subscription id
+   * synchronously and web3.js sends the subscribe request later, so a
+   * subscription established against a dead endpoint looks identical to a live
+   * one. The underlying rpc-websockets client is what actually knows, and it is
+   * reachable only as a private field — hence the guarded cast and the
+   * do-nothing fallback if a future web3.js renames it. Getting this wrong
+   * costs an inaccurate gauge, never a missed trade.
+   */
+  private trackSocketState(conn: Connection): void {
+    setWsConnected(false);
+    const sock = (conn as any)._rpcWebSocket;
+    if (!sock || typeof sock.on !== 'function') return;
+    sock.on('open', () => setWsConnected(true));
+    sock.on('close', () => setWsConnected(false));
+    sock.on('error', () => setWsConnected(false));
   }
 
   getConnection(): Connection {
@@ -208,6 +230,7 @@ export class WebSocketMonitor {
         wsEndpoint: config.wsUrl,
         commitment: 'confirmed',
       });
+      this.trackSocketState(this.connection);
 
       for (const listener of this.connectionListeners) {
         listener(this.connection);
@@ -256,6 +279,7 @@ export class WebSocketMonitor {
       this.heartbeatTimer = null;
     }
     this.removeAllSubscriptions();
+    setWsConnected(false);
     logger.info(MODULE, 'WebSocket monitor stopped');
   }
 }

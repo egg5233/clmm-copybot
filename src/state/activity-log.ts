@@ -13,6 +13,7 @@
  */
 
 import type { EventLogEntry, SwapHistoryEntry } from '../dashboard/context';
+import { recordEvent } from '../dashboard/metrics';
 import { events as eventsRepo, swapHistory as swapHistoryRepo } from './repo';
 import { WriteChain } from './write-chain';
 
@@ -115,6 +116,10 @@ export function backfillEventPools(positionPools: Record<string, string>): {
 export function pushEvent(entry: EventLogEntry, dex?: string): void {
   if (dex && !entry.dex) entry.dex = dex;
   if (entry.pool && entry.targetNft) poolMap[entry.targetNft] = entry.pool;
+
+  // Counted here rather than at the call site because this is the single
+  // writer: every feed append in the bot and the dashboard comes through it.
+  recordEvent(entry);
 
   eventLog.push(entry);
   while (eventLog.length > eventsRepo.MAX_EVENTS) eventLog.shift();

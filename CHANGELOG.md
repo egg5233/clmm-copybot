@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.35.0 (2026-08-18)
+
+- **[Feature] Postgres persistence**: all 12 JSON state stores replaced by a repository layer over Postgres (node-pg-migrate schema, comments naming the file each table replaces). Call sites keep synchronous in-memory reads; writes flush through strictly-ordered async chains that log failures instead of breaking the trading path. Fixes the 336KB-per-event whole-file rewrite and the five-writer `pending-swaps.json` race. Caches (`token-names`, `tvl-cache`) deliberately stay files. `scripts/migrate-json-to-pg.ts` imports legacy `data/` dirs idempotently.
+- **[Feature] docker-compose**: `postgres:16` (host port 5433) + one-shot migrate + bot + Rust-signer services (socket shared via volume); both Dockerfiles multi-stage and verified. CI runs repo integration tests against a Postgres service container.
+- **[Feature] Observability**: unauthenticated `GET /health` (db/ws/signer probes) and Prometheus `GET /metrics` (`copybot_events_total`, `copybot_queue_depth`, `copybot_signer_sign_seconds`, `copybot_ws_connected` + process metrics), served even without a dashboard password.
+- 313 TypeScript tests, 170 Rust tests.
+
 ## v1.34.0 (2026-08-18)
 
 - **[Feature] Rust signer (`signer-rs/`)**: drop-in rewrite of the signing daemon — same Unix-socket protocol, keyfile format, and env contract; the unmodified bot signs through it byte-identically. Verified by golden vectors generated from the TS implementation and an 18-case differential harness driving both signers with the bot's real client code (170 Rust tests).

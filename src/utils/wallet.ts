@@ -2,6 +2,7 @@ import net from 'net';
 import { Keypair, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { config } from '../config';
+import { observeSignerSign } from '../dashboard/metrics';
 import { SignerCallback } from 'byreal-clmm-sdk-alpha';
 
 // ── Mode detection ──────────────────────────────────────────────────────────
@@ -106,14 +107,22 @@ async function remoteSign(type: 'versioned' | 'legacy', txBytes: Uint8Array): Pr
     tx: Buffer.from(txBytes).toString('base64'),
   });
 
-  const response = await sendToSigner(Buffer.from(request, 'utf-8'));
-  const result = JSON.parse(response.toString('utf-8'));
+  // Timed around the socket round trip, and in the `finally` so a rejected or
+  // timed-out signing still lands in the histogram — a signer that hangs and
+  // then fails is exactly what the +Inf bucket is meant to surface.
+  const startedAt = process.hrtime.bigint();
+  try {
+    const response = await sendToSigner(Buffer.from(request, 'utf-8'));
+    const result = JSON.parse(response.toString('utf-8'));
 
-  if (!result.ok) {
-    throw new Error(`Signer rejected TX: ${result.error}`);
+    if (!result.ok) {
+      throw new Error(`Signer rejected TX: ${result.error}`);
+    }
+
+    return Buffer.from(result.tx, 'base64');
+  } finally {
+    observeSignerSign(Number(process.hrtime.bigint() - startedAt) / 1e9);
   }
-
-  return Buffer.from(result.tx, 'base64');
 }
 
 // ── Public signing API (works in both modes) ────────────────────────────────
