@@ -1,0 +1,6 @@
+# 預設文字檔用系統預設行尾（Windows 上 CRLF, Linux 上 LF）
+* text=auto
+
+# 以下類型強制 LF — 在 Windows 也用 LF，避免 scp 上 Linux VPS 後 bash 無法執行
+*.sh text eol=lf
+*.service text eol=lf

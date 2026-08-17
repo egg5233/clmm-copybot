@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+signer/.env
+data/
+signer/keyfile.enc.json
+*.log
+.claude/
