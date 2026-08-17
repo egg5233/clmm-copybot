@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 dotenvy.workspace = true
+rpassword.workspace = true
 signer-core.workspace = true
 
 [lints]

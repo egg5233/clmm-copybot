@@ -17,6 +17,7 @@ bincode = "1"
 bs58 = "0.5"
 dotenvy = "0.15"
 hex = "0.4"
+rpassword = "7"
 scrypt = "0.11"
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }

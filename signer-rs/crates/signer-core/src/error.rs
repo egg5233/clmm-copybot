@@ -64,6 +64,19 @@ pub enum CryptoError {
     /// The keyfile exists but its JSON or hex fields are unreadable.
     #[error("Encrypted keyfile is malformed: {0}")]
     MalformedKeyfile(String),
+
+    /// A base58 string is not a valid ed25519 secret key (`signer/setup.ts:44`).
+    #[error("Invalid private key: {0}")]
+    InvalidSecretKey(String),
+
+    /// AES-GCM refused to encrypt the key material. Only reachable for a
+    /// plaintext larger than GCM's 64 GiB message limit.
+    #[error("Failed to encrypt private key")]
+    EncryptFailed,
+
+    /// The keyfile could not be rendered as JSON.
+    #[error("Failed to serialize keyfile: {0}")]
+    Serialize(String),
 }
 
 /// Policy rejections (`signer/policy.ts`). Every variant means "do not sign".
