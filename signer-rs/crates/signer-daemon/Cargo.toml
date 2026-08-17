@@ -1,0 +1,18 @@
+[package]
+name = "signer-daemon"
+description = "Long-running Byreal signer process: loads config, serves signing requests."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "signer-daemon"
+path = "src/main.rs"
+
+[dependencies]
+dotenvy.workspace = true
+signer-core.workspace = true
+
+[lints]
+workspace = true
