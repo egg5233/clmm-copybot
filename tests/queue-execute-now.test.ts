@@ -33,6 +33,32 @@ describe('OperationQueue.executeNow', () => {
     expect(order[1].startsWith('end:')).toBe(true);
   });
 
+  it('is not starved by a queue backlog — runs after the current item, before pending ones', async () => {
+    // Regression: the event-driven drain dequeued the next pending item before
+    // the 200ms poller woke, so with a backlog executeNow waited for the whole
+    // queue instead of just the current item.
+    const queue = new OperationQueue();
+    const order: string[] = [];
+
+    queue.enqueue('A', 'HIGH', async () => {
+      order.push('A');
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    queue.enqueue('B', 'HIGH', async () => {
+      order.push('B');
+    });
+    await new Promise((r) => setTimeout(r, 50)); // let A start; B stays pending
+
+    await queue.executeNow('immediate', async () => {
+      order.push('immediate');
+    });
+    expect(order).toEqual(['A', 'immediate']);
+
+    // Queue resumes afterwards: B still runs.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(order).toEqual(['A', 'immediate', 'B']);
+  });
+
   it('waits for a running queued item before executing', async () => {
     const queue = new OperationQueue();
     const order: string[] = [];

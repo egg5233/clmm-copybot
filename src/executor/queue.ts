@@ -41,6 +41,12 @@ export class OperationQueue {
   private normalQueue: QueueItem[] = [];
   private running: QueueItem | null = null;
   private immediateRunning = false;
+  // Number of executeNow() callers waiting to run. The drain loop refuses to
+  // start a new queued item while this is non-zero — without the reservation,
+  // the event-driven drain always dequeues the next item before the 200ms
+  // poller wakes, so executeNow would wait for the whole queue instead of
+  // just the current item.
+  private immediateWaiting = 0;
   private draining = false;
   private idCounter = 0;
   private highPrioritySeq = 0;
@@ -90,21 +96,28 @@ export class OperationQueue {
    * where the dashboard needs a synchronous response (TX signature).
    */
   async executeNow<T>(label: string, fn: () => Promise<T>): Promise<T> {
-    // Wait for any currently running queued item AND any other executeNow to
-    // finish. Both conditions must be in the same loop: checking only
-    // `running` let two concurrent executeNow calls proceed together. The
-    // check-then-set below is safe because no await separates loop exit from
-    // setting the flag — the event loop cannot interleave another caller.
-    while (this.running || this.immediateRunning) {
-      logger.info(
-        MODULE,
-        `executeNow(${label}): waiting for ${this.running ? `running item "${this.running.label}"` : 'another immediate operation'} to finish...`,
-      );
-      await new Promise((r) => setTimeout(r, 200));
-    }
+    // Reserve the queue before waiting, so the drain loop holds the door once
+    // the current item finishes instead of starting the next queued item.
+    this.immediateWaiting++;
+    try {
+      // Wait for any currently running queued item AND any other executeNow to
+      // finish. Both conditions must be in the same loop: checking only
+      // `running` let two concurrent executeNow calls proceed together. The
+      // check-then-set below is safe because no await separates loop exit from
+      // setting the flag — the event loop cannot interleave another caller.
+      while (this.running || this.immediateRunning) {
+        logger.info(
+          MODULE,
+          `executeNow(${label}): waiting for ${this.running ? `running item "${this.running.label}"` : 'another immediate operation'} to finish...`,
+        );
+        await new Promise((r) => setTimeout(r, 200));
+      }
 
-    // Block queue draining while we run
-    this.immediateRunning = true;
+      // Block queue draining while we run
+      this.immediateRunning = true;
+    } finally {
+      this.immediateWaiting--;
+    }
     logger.info(MODULE, `executeNow(${label}): executing immediately`);
 
     try {
@@ -189,8 +202,8 @@ export class OperationQueue {
 
     try {
       while (this.highQueue.length > 0 || this.normalQueue.length > 0) {
-        // Pause if an immediate operation is running
-        if (this.immediateRunning) {
+        // Pause if an immediate operation is running or waiting its turn
+        if (this.immediateRunning || this.immediateWaiting > 0) {
           break;
         }
 
@@ -224,7 +237,11 @@ export class OperationQueue {
     }
 
     // Check if new items were added while we were finishing
-    if ((this.highQueue.length > 0 || this.normalQueue.length > 0) && !this.immediateRunning) {
+    if (
+      (this.highQueue.length > 0 || this.normalQueue.length > 0) &&
+      !this.immediateRunning &&
+      this.immediateWaiting === 0
+    ) {
       this.scheduleDrain();
     }
   }

@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.35.2 (2026-08-20)
+
+- **[Fix] `executeNow()` starved by queue backlog**: the 200ms poller always lost the race to the event-driven drain loop — the instant the current item finished, drain dequeued the next pending item, so with a backlog a dashboard manual-close waited for the entire queue instead of just the current item, contradicting the method's contract. `executeNow` now registers an `immediateWaiting` reservation the drain loop respects. Regression test added.
+
 ## v1.35.1 (2026-08-18)
 
 External code review (5 findings, all verified and addressed):
