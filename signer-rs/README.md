@@ -88,25 +88,58 @@ Preserved verbatim (a drop-in replacement must not silently change policy):
 
 Deliberately changed (each was a real gap in the TS implementation):
 
-| Change                                                          | Why                                               |
-| --------------------------------------------------------------- | ------------------------------------------------- |
-| 64 KiB max frame length, reject + close                         | TS read an unbounded `Buffer.concat` — OOM vector |
-| `while`-loop frame parsing                                      | TS used `if` — pipelined frames stalled           |
-| SPL `Approve` enforced (whitelisted delegate or DEX tx)         | TS logged a warning but signed anyway             |
-| Key material zeroized (`secrecy`/`zeroize`)                     | TS kept the key in a module-level string          |
-| Exponential backoff on failed unlock attempts                   | TS had no rate limit on `POST /unlock`            |
-| `versioned` request carrying legacy bytes is rejected           | web3.js silently fell back to the legacy decoder  |
-| Opt-in `SO_PEERCRED` same-UID check (`SIGNER_REQUIRE_PEER_UID`) | socket was guarded by file perms only             |
+| Change                                                          | Why                                                  |
+| --------------------------------------------------------------- | ---------------------------------------------------- |
+| 64 KiB max frame length, reject + close                         | TS read an unbounded `Buffer.concat` — OOM vector    |
+| `while`-loop frame parsing                                      | TS used `if` — pipelined frames stalled              |
+| SPL `Approve` enforced (whitelisted delegate or DEX tx)         | TS logged a warning but signed anyway                |
+| Native SOL transfer destination checked (whitelist or DEX tx)   | TS inspected only SPL instructions, signed unchecked |
+| Key material zeroized (`secrecy`/`zeroize`)                     | TS kept the key in a module-level string             |
+| Exponential backoff on failed unlock attempts                   | TS had no rate limit on `POST /unlock`               |
+| `versioned` request carrying legacy bytes is rejected           | web3.js silently fell back to the legacy decoder     |
+| Opt-in `SO_PEERCRED` same-UID check (`SIGNER_REQUIRE_PEER_UID`) | socket was guarded by file perms only                |
 
 ## Threat model
 
-The signer defends against a **compromised bot process**: the key never enters
-the bot, and a hijacked bot can only submit transactions the policy engine
-would sign anyway (allowlisted programs, checked SPL destinations, simulated
-CPI discovery). It does **not** defend against a compromised host, a malicious
-allowlisted program, or someone with the unlock password. The unlock HTTP
-server is hardcoded to 127.0.0.1 and reached only through the dashboard's
-authenticated proxy.
+The signer sits between a **compromised bot process** and the key: the key never
+enters the bot, and every transaction is filtered before it is signed. But the
+containment that filter provides against a _fully_ compromised bot is partial,
+and it is worth being exact about where the hard line is rather than overselling
+it.
+
+The soft spot is deliberate. A transfer or an `Approve` bundled **alongside an
+allowlisted DEX instruction is signed** — the `has_dex_instruction` pass exists
+because legitimate swap and LP flows wrap WSOL and fund intermediate accounts
+with transfers that have no standalone justification the signer can see. That
+compatibility trade-off is also an exfiltration path: a compromised bot can move
+tokens or lamports to an address it controls by pairing the transfer with a
+harmless call to, say, the Byreal program. The signer does not stop that, and
+claiming otherwise would be a lie the code does not back up.
+
+What the boundary _does_ guarantee, even against a bot that is doing its worst:
+
+- A program off the allowlist is **never** signed — top-level or, once
+  simulation runs, revealed as a CPI in the logs.
+- SPL `SetAuthority` is **never** signed: the wallet's token accounts cannot be
+  handed to another authority.
+- A **standalone** transfer to an address nothing vouches for is never signed —
+  SPL tokens (checked destination) and, now, native SOL (checked recipient).
+  "Standalone" is the operative word: see the DEX-bundling caveat above.
+- The key never leaves the process, in memory zeroized after use, never written
+  anywhere but the encrypted keyfile.
+
+It does **not** defend against a compromised host, a malicious allowlisted
+program, or someone with the unlock password. The unlock HTTP server is
+hardcoded to 127.0.0.1 and reached only through the dashboard's authenticated
+proxy.
+
+**Future work — a strict mode.** Closing the DEX-bundling gap means rejecting a
+transfer that rides alongside a DEX instruction unless its destination is one of
+the wallet's own associated token accounts (so WSOL wraps and intermediate-account
+funding still pass while an exfiltration to a foreign address does not). That
+needs own-wallet-ATA allowances the current policy does not compute, so it is
+recorded here rather than shipped half-built — a strict mode that broke every
+swap would be worse than the honest soft boundary it replaced.
 
 ## Running
 

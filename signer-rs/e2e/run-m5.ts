@@ -67,6 +67,7 @@ interface TxVectorFile {
     signer_pubkey: string;
     dest_ata: string;
     signer_ata: string;
+    recipient_pubkey: string;
     blockhash: string;
   };
   vectors: TxVector[];
@@ -110,7 +111,12 @@ async function main(): Promise<void> {
 
   const txFixture = load<TxVectorFile>(TX_VECTORS);
   const simFixture = load<SimVectorFile>(SIM_VECTORS);
-  const { signer_pubkey: signerPubkey, dest_ata: destAta, blockhash } = txFixture._fixed_material;
+  const {
+    signer_pubkey: signerPubkey,
+    dest_ata: destAta,
+    recipient_pubkey: recipientPubkey,
+    blockhash,
+  } = txFixture._fixed_material;
 
   const clean = find(simFixture.vectors, 'simple_two_programs', SIM_VECTORS);
   const hostile = find(simFixture.vectors, 'off_allowlist_cpi', SIM_VECTORS);
@@ -127,7 +133,15 @@ async function main(): Promise<void> {
   // and the one M3 sidesteps with `SIGNER_DEST_WHITELIST`.
   rpc.state.accounts.set(destAta, { owner: TOKEN_PROGRAM, data: Buffer.alloc(165) });
 
-  const daemon = await startDaemon({ workspace, rpcUrl: rpc.url });
+  // `v0_no_alt` also bundles a bare `SystemProgram.transfer` to this recipient.
+  // There is no chain-owner exemption for native SOL — only a whitelisted
+  // recipient or a DEX instruction clears it — so it is whitelisted here, leaving
+  // the SPL destination to be vouched for by the chain as these checks intend.
+  const daemon = await startDaemon({
+    workspace,
+    rpcUrl: rpc.url,
+    env: { SIGNER_DEST_WHITELIST: recipientPubkey },
+  });
   const socket = workspace.socketPath;
   const v0 = find(txFixture.vectors, 'v0_no_alt', TX_VECTORS);
   console.log('\nChecks:');

@@ -12,25 +12,34 @@
 //! 1. **Program allowlist.** Every top-level instruction must invoke a program on
 //!    the list ([`crate::config::program_allowlist`]). This is the coarse filter —
 //!    a transaction calling an unknown program is refused outright.
-//! 2. **SPL token rules.** Within the two token programs, `SetAuthority` is always
-//!    refused, `Approve` and `Transfer`/`TransferChecked` are refused unless the
-//!    delegate or destination clears [`spl`]'s chain of exemptions.
+//! 2. **SPL token and native-SOL rules.** Within the two token programs,
+//!    `SetAuthority` is always refused, `Approve` and `Transfer`/`TransferChecked`
+//!    are refused unless the delegate or destination clears [`spl`]'s chain of
+//!    exemptions. Within the System Program, a bare lamport `Transfer` is refused
+//!    unless its recipient clears [`system`]'s chain — a check with no TypeScript
+//!    counterpart, closing the gap that let a `SystemProgram.transfer` be signed
+//!    unchecked.
 //! 3. **Post-simulation CPI check.** Simulate, then hold every program the logs
 //!    show was actually invoked to the same allowlist — see [`simulation`], which
 //!    is also where the reasons simulation is otherwise non-fatal are set out.
 //!
 //! # Ordering
 //!
-//! The allowlist runs to completion over every instruction before the first SPL
-//! check, exactly as in the TypeScript, so an unknown program anywhere in a
-//! transaction outranks a `SetAuthority` earlier in it. Within the SPL pass the
-//! first offending instruction decides, and inside a transfer the exemptions are
-//! tried in the TypeScript's order — see [`spl::check`]. Simulation runs last and
-//! only for a transaction that already cleared both static passes, so the
-//! expensive check never runs for a transaction that was going to be refused.
+//! The allowlist runs to completion over every instruction before the first
+//! instruction-level check, exactly as in the TypeScript, so an unknown program
+//! anywhere in a transaction outranks a `SetAuthority` earlier in it. The
+//! instruction-level pass then walks the instructions once, applying the SPL and
+//! System rules to each; the first offending instruction decides, and inside a
+//! transfer the exemptions are tried in the TypeScript's order — see
+//! [`spl::check`]. Any one instruction belongs to at most one of the two programs,
+//! so the order the two checks run in within an instruction is immaterial.
+//! Simulation runs last and only for a transaction that already cleared both
+//! static passes, so the expensive check never runs for a transaction that was
+//! going to be refused.
 
 pub mod simulation;
 pub mod spl;
+pub mod system;
 
 use crate::alt::{self, ResolvedTx};
 use crate::config::PolicyConfig;
@@ -167,6 +176,9 @@ impl PolicyEngine {
 
         for ix in &resolved.instructions {
             if let Some(err) = spl::check(&self.config, resolved, ix, has_dex_instruction, rpc) {
+                return err.into();
+            }
+            if let Some(err) = system::check(&self.config, resolved, ix, has_dex_instruction) {
                 return err.into();
             }
         }

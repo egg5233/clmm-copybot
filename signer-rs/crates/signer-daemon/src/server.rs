@@ -481,11 +481,19 @@ mod tests {
         let policy = PolicyEngine::new(PolicyConfig {
             program_allowlist: program_allowlist(BYREAL_CLMM),
             dex_programs: dex_programs(BYREAL_CLMM),
-            destination_whitelist: std::collections::HashSet::new(),
+            // The one payload these socket tests sign is a bare lamport transfer;
+            // whitelisting its recipient is what keeps it policy-clean now that a
+            // standalone SOL transfer to an unvouched address is refused.
+            destination_whitelist: std::iter::once(TRANSFER_RECIPIENT).collect(),
             jupiter: JUPITER_V6,
         });
         Arc::new(Signer::new(keypair, policy, Box::new(MockRpc::new())))
     }
+
+    /// The recipient of [`unsigned_transfer`]; whitelisted by [`signer`] so the
+    /// payload clears the native-SOL transfer rule. Fixed rather than unique so
+    /// the whitelist can name it.
+    const TRANSFER_RECIPIENT: Pubkey = Pubkey::new_from_array([9u8; 32]);
 
     /// Starts a server on a fresh socket and returns it with its signing key.
     fn start() -> (TempSocket, Arc<Keypair>) {
@@ -506,11 +514,11 @@ mod tests {
 
     /// An unsigned legacy transaction `payer` is the sole signer of.
     ///
-    /// A System transfer: the smallest payload that is both signable and
-    /// policy-clean, since the System program is on the allowlist and a lamport
-    /// move is not an SPL token instruction. What is under test is the socket
-    /// round trip, not the payload — but the payload has to survive the policy
-    /// to get as far as a signature.
+    /// A System transfer to [`TRANSFER_RECIPIENT`]: the smallest payload that is
+    /// both signable and policy-clean. The System program is on the allowlist, and
+    /// the recipient is whitelisted by [`signer`] so the native-SOL transfer rule
+    /// clears it. What is under test is the socket round trip, not the payload —
+    /// but the payload has to survive the policy to get as far as a signature.
     fn unsigned_transfer(payer: &Keypair) -> Vec<u8> {
         // `System::Transfer { lamports: 1000 }`, hand-encoded: a u32
         // discriminator then a u64 amount. `solana_sdk::system_instruction` is
@@ -523,7 +531,7 @@ mod tests {
             &data,
             vec![
                 AccountMeta::new(payer.pubkey(), true),
-                AccountMeta::new(Pubkey::new_unique(), false),
+                AccountMeta::new(TRANSFER_RECIPIENT, false),
             ],
         );
         let message = Message::new(&[instruction], Some(&payer.pubkey()));

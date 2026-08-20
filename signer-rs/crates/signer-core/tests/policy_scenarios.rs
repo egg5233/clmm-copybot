@@ -52,6 +52,31 @@ fn transfer_checked_data() -> Vec<u8> {
     data
 }
 
+// System Program instructions encode a 4-byte little-endian discriminator, not a
+// single byte. Only those four bytes are read by the policy engine; the rest is
+// shaped like the real instruction so the fixtures stay recognisable.
+
+fn system_transfer_data() -> Vec<u8> {
+    let mut data = 2u32.to_le_bytes().to_vec();
+    data.extend_from_slice(&1_000_000u64.to_le_bytes());
+    data
+}
+
+fn system_transfer_with_seed_data() -> Vec<u8> {
+    let mut data = 11u32.to_le_bytes().to_vec();
+    data.extend_from_slice(&1_000_000u64.to_le_bytes());
+    data
+}
+
+fn create_account_data() -> Vec<u8> {
+    // CreateAccount is variant 0: lamports, space, owner.
+    let mut data = 0u32.to_le_bytes().to_vec();
+    data.extend_from_slice(&2_039_280u64.to_le_bytes());
+    data.extend_from_slice(&165u64.to_le_bytes());
+    data.extend_from_slice(&[0u8; 32]);
+    data
+}
+
 // ── Builders ────────────────────────────────────────────────────────────────
 
 /// Assembles a [`ResolvedTx`], interning account keys as instructions name them.
@@ -622,7 +647,119 @@ fn the_first_offending_transfer_decides() {
     );
 }
 
-// ── 5. Instructions the rules do not reach ──────────────────────────────────
+// ── 5. Native SOL transfers ─────────────────────────────────────────────────
+
+#[test]
+fn a_standalone_sol_transfer_to_an_unknown_address_is_denied() {
+    let recipient = Pubkey::new_unique();
+    let tx = Tx::new()
+        .ix(
+            SYSTEM_PROGRAM,
+            &[Pubkey::new_unique(), recipient],
+            system_transfer_data(),
+        )
+        .build();
+
+    let verdict = engine(&[]).check_static(&tx, &MockRpc::new());
+    assert_denied(
+        &verdict,
+        &format!("Standalone SOL transfer to non-whitelisted address: {recipient}"),
+    );
+}
+
+#[test]
+fn a_sol_transfer_to_a_whitelisted_recipient_is_allowed() {
+    let recipient = Pubkey::new_unique();
+    let tx = Tx::new()
+        .ix(
+            SYSTEM_PROGRAM,
+            &[Pubkey::new_unique(), recipient],
+            system_transfer_data(),
+        )
+        .build();
+
+    let rpc = MockRpc::new();
+    assert_allowed(&engine(&[recipient]).check_static(&tx, &rpc));
+    assert_eq!(
+        rpc.single_calls(),
+        0,
+        "the native-SOL rule reaches no RPC — it is whitelist-or-DEX only"
+    );
+}
+
+#[test]
+fn a_sol_transfer_alongside_a_dex_instruction_is_allowed() {
+    // A WSOL wrap or an SDK position-funding transfer rides inside a swap/LP
+    // transaction; the DEX instruction is what excuses the lamport move.
+    let recipient = Pubkey::new_unique();
+    let tx = Tx::new()
+        .ix(BYREAL_CLMM, &[Pubkey::new_unique()], vec![0xaa])
+        .ix(
+            SYSTEM_PROGRAM,
+            &[Pubkey::new_unique(), recipient],
+            system_transfer_data(),
+        )
+        .build();
+
+    assert_allowed(&engine(&[]).check_static(&tx, &MockRpc::new()));
+}
+
+#[test]
+fn a_transfer_with_seed_to_an_unknown_recipient_is_denied() {
+    // TransferWithSeed is [funding, base, recipient]: the recipient is the third
+    // account, not the second. Whitelisting the base must not launder it — this
+    // fails if the operand index slips to 1.
+    let base = Pubkey::new_unique();
+    let recipient = Pubkey::new_unique();
+    let tx = Tx::new()
+        .ix(
+            SYSTEM_PROGRAM,
+            &[Pubkey::new_unique(), base, recipient],
+            system_transfer_with_seed_data(),
+        )
+        .build();
+
+    let verdict = engine(&[base]).check_static(&tx, &MockRpc::new());
+    assert_denied(
+        &verdict,
+        &format!("Standalone SOL transfer to non-whitelisted address: {recipient}"),
+    );
+}
+
+#[test]
+fn a_create_account_instruction_is_allowed() {
+    // Discriminator 0 funds a new account the transaction is itself creating, not
+    // a third party — the TypeScript signed it and so does this. Only Transfer and
+    // TransferWithSeed are policed.
+    let tx = Tx::new()
+        .ix(
+            SYSTEM_PROGRAM,
+            &[Pubkey::new_unique(), Pubkey::new_unique()],
+            create_account_data(),
+        )
+        .build();
+
+    assert_allowed(&engine(&[]).check_static(&tx, &MockRpc::new()));
+}
+
+#[test]
+fn a_truncated_system_instruction_is_ignored() {
+    // Fewer than the four discriminator bytes: matches no variant and falls
+    // through, mirroring how an empty SPL data buffer is ignored. Such an
+    // instruction cannot execute, so there is nothing to police.
+    for data in [Vec::new(), vec![2u8], vec![2u8, 0, 0]] {
+        let tx = Tx::new()
+            .ix(
+                SYSTEM_PROGRAM,
+                &[Pubkey::new_unique(), Pubkey::new_unique()],
+                data,
+            )
+            .build();
+        assert_allowed(&engine(&[]).check_static(&tx, &MockRpc::new()));
+    }
+}
+
+// ── 6. Instructions the rules do not reach ──────────────────────────────────
 
 #[test]
 fn the_spl_rules_do_not_apply_to_other_programs() {

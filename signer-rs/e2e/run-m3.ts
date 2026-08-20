@@ -18,11 +18,13 @@
  *
  * The two fixtures move SPL tokens to a fixed destination ATA with no DEX
  * instruction beside them, which is exactly the shape the transfer rule refuses
- * for an unknown address. `SIGNER_DEST_WHITELIST` names that destination, the
- * same way an operator whitelists the daily auto-convert target — the cheapest
- * of the destination exemptions and the only one that needs no network, which is
- * what keeps this run offline. `run-m5.ts` covers the version of this that lets
- * the chain vouch for the destination instead.
+ * for an unknown address; `v0_no_alt` additionally bundles a bare
+ * `SystemProgram.transfer` to a fixed recipient, which the native-SOL rule
+ * refuses on the same grounds. `SIGNER_DEST_WHITELIST` names both, the same way
+ * an operator whitelists the daily auto-convert target — the cheapest of the
+ * destination exemptions and the only one that needs no network, which is what
+ * keeps this run offline. `run-m5.ts` covers the version of this that lets the
+ * chain vouch for the destination instead.
  *
  * Run from `signer-rs/`:  npx ts-node --project e2e/tsconfig.json e2e/run-m3.ts
  * Or from `signer-rs/e2e/`:  npm run e2e:m3
@@ -56,7 +58,7 @@ interface TxVector {
 }
 
 interface VectorFile {
-  _fixed_material: { signer_pubkey: string; dest_ata: string };
+  _fixed_material: { signer_pubkey: string; dest_ata: string; recipient_pubkey: string };
   vectors: TxVector[];
 }
 
@@ -76,7 +78,9 @@ async function main(): Promise<void> {
   const daemon = await startDaemon({
     workspace,
     rpcUrl: DEAD_RPC,
-    env: { SIGNER_DEST_WHITELIST: fixture._fixed_material.dest_ata },
+    env: {
+      SIGNER_DEST_WHITELIST: `${fixture._fixed_material.dest_ata},${fixture._fixed_material.recipient_pubkey}`,
+    },
   });
   console.log('\nChecks:');
 

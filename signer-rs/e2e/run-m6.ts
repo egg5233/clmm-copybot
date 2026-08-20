@@ -87,7 +87,7 @@ interface TxVector {
 }
 
 interface VectorFile {
-  _fixed_material: { signer_pubkey: string; dest_ata: string };
+  _fixed_material: { signer_pubkey: string; dest_ata: string; recipient_pubkey: string };
   vectors: TxVector[];
 }
 
@@ -241,7 +241,9 @@ async function main(): Promise<void> {
     rpcUrl: DEAD_RPC,
     env: {
       SIGNER_UNLOCK_PORT: String(port),
-      SIGNER_DEST_WHITELIST: fixture._fixed_material.dest_ata,
+      // `v0_no_alt` moves SPL tokens to dest_ata and lamports to recipient_pubkey;
+      // both destinations must be whitelisted for it to clear the transfer rules.
+      SIGNER_DEST_WHITELIST: `${fixture._fixed_material.dest_ata},${fixture._fixed_material.recipient_pubkey}`,
     },
   });
 

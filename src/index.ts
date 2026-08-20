@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import BN from 'bn.js';
+import { computeSwapCapRaw } from './utils/ratio';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { config, requireDatabaseUrl } from './config';
 import { logger } from './utils/logger';
@@ -664,14 +664,23 @@ async function handleEvent(
           config.dammv2WalletAmountRatios.get(targetAddr) ??
           config.walletAmountRatios.get(targetAddr) ??
           config.amountRatio;
-        // Scale target's swap amount by ratio
-        const targetRaw = new BN(event.inputAmountRaw || '0');
-        const ratioBps = Math.floor(walletRatio * 10000);
-        const scaledAmount = targetRaw.mul(new BN(ratioBps)).div(new BN(10000));
-        const maxAmountRaw = scaledAmount.gt(new BN(0)) ? scaledAmount.toString() : undefined;
+        // Scale target's swap amount by ratio. A cap we cannot compute as a
+        // positive amount (missing parsed amount, or a ratio that rounds the
+        // scaled value to zero) must SKIP the swap — passing undefined here
+        // would tell swapTokenToUSDC to sell the entire wallet balance of the
+        // token, turning a dust-sized target swap into a full liquidation.
+        // Manual full-balance swaps remain available via the dashboard.
+        const maxAmountRaw = computeSwapCapRaw(event.inputAmountRaw, walletRatio);
+        if (maxAmountRaw === null) {
+          logger.warn(
+            MODULE,
+            `[${botLabel}][JUPITER SWAP] Skipping ${event.inputMint.slice(0, 8)}: target amount ${event.inputAmountRaw || '(unknown)'} × ratio=${walletRatio} scales to zero — not swapping (use dashboard force-swap for a full-balance sell)`,
+          );
+          return;
+        }
         logger.info(
           MODULE,
-          `[${botLabel}][JUPITER SWAP] Target swapped ${event.inputAmountRaw} × ratio=${walletRatio} → max=${maxAmountRaw || 'all'}`,
+          `[${botLabel}][JUPITER SWAP] Target swapped ${event.inputAmountRaw} × ratio=${walletRatio} → max=${maxAmountRaw}`,
         );
         const result = await byrealExecutor.swapTokenToUSDC(event.inputMint, maxAmountRaw);
         if (result) {

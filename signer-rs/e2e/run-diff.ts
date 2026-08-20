@@ -111,6 +111,7 @@ interface TxVectorFile {
     signer_pubkey: string;
     signer_ata: string;
     dest_ata: string;
+    recipient_pubkey: string;
     blockhash: string;
   };
   vectors: TxVector[];
@@ -417,23 +418,27 @@ function openPhase({ txFixture, simFixture, rpc, signer, standaloneTransfer }: C
     return found;
   };
 
-  const { dest_ata: destAta, blockhash } = txFixture._fixed_material;
+  const {
+    dest_ata: destAta,
+    recipient_pubkey: recipientPubkey,
+    blockhash,
+  } = txFixture._fixed_material;
   const hostile = simVector('off_allowlist_cpi');
   const unknownInvoked = hostile.off_allowlist_program_id;
   if (!unknownInvoked) throw new Error('off_allowlist_cpi must name its off-allowlist program');
 
   const legacy = vector('legacy_spl_transfer');
-  const v0 = vector('v0_no_alt');
+  const v0NoAlt = vector('v0_no_alt');
+  const v0WithAlt = vector('v0_with_alt');
 
   const cases: Case[] = [];
 
-  // ── The four golden vectors, unsigned, through both signers ───────────────
-  for (const name of [
-    'legacy_spl_transfer',
-    'legacy_two_signer_presigned',
-    'v0_no_alt',
-    'v0_with_alt',
-  ]) {
+  // ── The golden vectors that sign under both signers ───────────────────────
+  //
+  // `v0_no_alt` is deliberately absent: it bundles a bare SystemProgram.transfer
+  // that the Rust daemon now refuses and the TypeScript signer still signs, so it
+  // is pinned below as a declared divergence rather than a byte-identity check.
+  for (const name of ['legacy_spl_transfer', 'legacy_two_signer_presigned', 'v0_with_alt']) {
     const tx = vector(name);
     cases.push({
       name: `${name} signs`,
@@ -446,14 +451,43 @@ function openPhase({ txFixture, simFixture, rpc, signer, standaloneTransfer }: C
   }
 
   cases.push({
-    // `v0_no_alt` has already been through both signers once, above. Signing is
+    // A standalone SOL transfer, the one new native-SOL divergence. `v0_no_alt`
+    // pairs a `SystemProgram.transfer` to an unwhitelisted recipient with an SPL
+    // transfer and no DEX instruction. The TypeScript signer inspects only SPL
+    // token instructions and leaves the System program — which is on the
+    // allowlist — unchecked, so it signs the lamport move. The Rust daemon holds
+    // a standalone SOL transfer to the same bar as a standalone SPL transfer and
+    // refuses it (`signer-core/src/policy/system.rs`).
+    name: 'a standalone SOL transfer (bundled in v0_no_alt)',
+    ask: (socket) => signRequest(socket, { type: v0NoAlt.kind, tx: v0NoAlt.unsigned_b64 }),
+    divergence: {
+      kind: 'behaviour',
+      why:
+        '`v0_no_alt` carries a bare SystemProgram.transfer alongside an SPL transfer, with no DEX ' +
+        'instruction to excuse it. `signer/policy.ts` inspects only the two SPL token programs and ' +
+        'leaves the allowlisted System program unchecked, so the TypeScript signer signs a lamport ' +
+        'move to an address nothing vouches for. `policy/system.rs` refuses it, mirroring the SPL ' +
+        'transfer rule: a standalone SOL transfer needs a whitelisted recipient or a DEX ' +
+        'instruction in the same transaction. The bot never emits one — SOL moves only inside DEX ' +
+        'SDK transactions — so the refusal costs nothing the bot uses.',
+      rust: (result) =>
+        expectRejected(
+          result,
+          `Standalone SOL transfer to non-whitelisted address: ${recipientPubkey}`,
+        ),
+    },
+  });
+
+  cases.push({
+    // `v0_with_alt` has already been through both signers once, above. Signing is
     // idempotent — no nonce, no replay window, no per-request state — and this
     // is where that gets checked, on both sides at once: the second answer has
     // to be the first answer, which the assertion against the golden bytes
-    // pins down for each signer independently.
+    // pins down for each signer independently. (The ALT vector stands in for
+    // `v0_no_alt` here, which no longer signs under the Rust daemon.)
     name: 'the same transaction sent twice',
-    ask: (socket) => signRequest(socket, { type: v0.kind, tx: v0.unsigned_b64 }),
-    agreed: (result) => expectEqual(result.tx, v0.ts_signed_b64, 're-sent signed bytes'),
+    ask: (socket) => signRequest(socket, { type: v0WithAlt.kind, tx: v0WithAlt.unsigned_b64 }),
+    agreed: (result) => expectEqual(result.tx, v0WithAlt.ts_signed_b64, 're-sent signed bytes'),
   });
 
   // ── Malformed requests ────────────────────────────────────────────────────
@@ -591,12 +625,14 @@ function openPhase({ txFixture, simFixture, rpc, signer, standaloneTransfer }: C
     // transaction through `Connection.simulateTransaction(Transaction)`, which
     // fetches a blockhash first and therefore never reaches this mock's
     // simulation at all; the v0 path posts the transaction as-is, so both
-    // signers see the logs arranged here and both act on them.
+    // signers see the logs arranged here and both act on them. `v0_with_alt`
+    // rather than `v0_no_alt` because the latter's bare SOL transfer is now
+    // refused at the static pass, before either signer would simulate.
     name: 'simulation logs naming an off-allowlist program',
     arrange: () => {
       rpc.state.simulate = { err: null, logs: hostile.logs };
     },
-    ask: (socket) => signRequest(socket, { type: v0.kind, tx: v0.unsigned_b64 }),
+    ask: (socket) => signRequest(socket, { type: v0WithAlt.kind, tx: v0WithAlt.unsigned_b64 }),
     agreed: (result) =>
       expectRejected(result, `Simulation revealed unknown invoked program: ${unknownInvoked}`),
   });

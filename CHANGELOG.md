@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.35.1 (2026-08-18)
+
+External code review (5 findings, all verified and addressed):
+
+- **[Fix][Critical] Copied-swap sizing**: a target swap whose scaled amount rounded to zero (dust amount, or sub-1bps ratio) passed `undefined` as the cap, which the executor reads as "swap the full wallet balance" — a dust-sized target swap could liquidate the bot's entire holding of that token. Zero/unknown caps now skip the swap (`computeSwapCapRaw`, regression-tested); manual full-balance swaps remain a dashboard action.
+- **[Fix] Queue race**: two concurrent `executeNow()` calls could both pass the busy check and run concurrently; the wait loop now also covers `immediateRunning` (test added).
+- **[Security] Native-SOL transfer check (Rust signer)**: bare `SystemProgram` transfers were signed unchecked; standalone SOL transfers now require a whitelisted recipient (or a DEX-bundled transaction), mirroring the SPL chain. 6 new policy tests; pinned as a declared divergence in the differential harness.
+- **[Docs] Honest threat model**: the DEX-bundling pass (transfer/approve alongside an allowlisted DEX instruction is signed) is now stated plainly as a deliberate, abusable compatibility trade-off — containment against a fully compromised bot is partial; strict mode recorded as future work.
+- **[Fix] Write-chain durability**: failed Postgres writes now retry with backoff (500ms/2s/5s) before being dropped; residual delete-reappear risk documented with reconciliation as the backstop.
+- **[Chore]**: `ws` declared as a direct dependency; `docs/dependency-audit.md` triages the 23 transitive npm-audit findings (all via pinned DEX-SDK dependency chains).
+
 ## v1.35.0 (2026-08-18)
 
 - **[Feature] Postgres persistence**: all 12 JSON state stores replaced by a repository layer over Postgres (node-pg-migrate schema, comments naming the file each table replaces). Call sites keep synchronous in-memory reads; writes flush through strictly-ordered async chains that log failures instead of breaking the trading path. Fixes the 336KB-per-event whole-file rewrite and the five-writer `pending-swaps.json` race. Caches (`token-names`, `tvl-cache`) deliberately stay files. `scripts/migrate-json-to-pg.ts` imports legacy `data/` dirs idempotently.

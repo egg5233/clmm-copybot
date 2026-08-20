@@ -160,6 +160,17 @@ pub enum PolicyError {
     /// A bare SPL transfer (no DEX instruction alongside it) to an unknown address.
     #[error("Standalone SPL transfer to non-whitelisted address: {0}")]
     NonWhitelistedTransfer(Pubkey),
+
+    /// A bare native-SOL transfer (no DEX instruction alongside it) to an unknown
+    /// address.
+    ///
+    /// New enforcement with no TypeScript counterpart: `signer/policy.ts` inspects
+    /// only SPL token instructions, and the System Program is on the allowlist, so
+    /// a `SystemProgram.transfer` to any address was signed unchecked — a strictly
+    /// cheaper drain than the SPL transfer the same file blocks, needing no token
+    /// account at all. See [`crate::policy::system`].
+    #[error("Standalone SOL transfer to non-whitelisted address: {0}")]
+    StandaloneSolTransfer(Pubkey),
 }
 
 /// Transaction decoding failures (`signer/policy.ts`, `signer/alt-resolver.ts`).

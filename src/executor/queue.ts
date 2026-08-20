@@ -90,11 +90,15 @@ export class OperationQueue {
    * where the dashboard needs a synchronous response (TX signature).
    */
   async executeNow<T>(label: string, fn: () => Promise<T>): Promise<T> {
-    // Wait for any currently running item to finish
-    while (this.running) {
+    // Wait for any currently running queued item AND any other executeNow to
+    // finish. Both conditions must be in the same loop: checking only
+    // `running` let two concurrent executeNow calls proceed together. The
+    // check-then-set below is safe because no await separates loop exit from
+    // setting the flag — the event loop cannot interleave another caller.
+    while (this.running || this.immediateRunning) {
       logger.info(
         MODULE,
-        `executeNow(${label}): waiting for running item "${this.running.label}" to finish...`,
+        `executeNow(${label}): waiting for ${this.running ? `running item "${this.running.label}"` : 'another immediate operation'} to finish...`,
       );
       await new Promise((r) => setTimeout(r, 200));
     }

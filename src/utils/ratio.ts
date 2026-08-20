@@ -31,3 +31,21 @@ export function scaleAmount(amount: BN, walletAddress?: string): BN {
 export function scaleNumericAmount(amount: number, walletAddress?: string): number {
   return Math.floor(amount * getAmountRatio(walletAddress));
 }
+
+/**
+ * Compute the max raw amount for a copied swap, or null when the swap must be
+ * skipped. Returns null when the target amount is missing/unparseable or when
+ * ratio scaling rounds it to zero — a cap we cannot state as a positive amount
+ * must never fall back to "no cap": downstream, an absent cap means "swap the
+ * entire wallet balance", which would turn a dust-sized target swap into a
+ * full liquidation.
+ */
+export function computeSwapCapRaw(
+  inputAmountRaw: string | undefined,
+  ratio: number,
+): string | null {
+  const targetRaw = new BN(inputAmountRaw || '0');
+  const ratioBps = Math.floor(ratio * 10000);
+  const scaled = targetRaw.mul(new BN(ratioBps)).div(new BN(10000));
+  return scaled.gt(new BN(0)) ? scaled.toString() : null;
+}
